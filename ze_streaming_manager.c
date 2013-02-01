@@ -282,7 +282,7 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 
     // Create event queue associated with that looper //XXX !!! wtf is 45 ??
     mngr->sensorEventQueue =
-    		ASensorManager_createEventQueue(sensorManager, looper, 45, NULL, NULL);
+    		ASensorManager_createEventQueue(mngr->sensorManager, mngr->looper, 45, NULL, NULL);
     LOGI("got sensorEventQueue");
 
 	ASensorEvent event;
@@ -315,14 +315,14 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 			 * we are replacing an already existing stream, not only when
 			 * we're not able to start one.
 			 * Ok let's make it return NULL in both cases.. */
-			if ( sm_start_stream(mngr, sm_req.sensor, sm_req.reg, sm_req.freq) == NULL)
-				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.reg,
+			if ( sm_start_stream(mngr, sm_req.sensor, sm_req.ticket, sm_req.freq) == NULL)
+				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
 						NULL, NULL);
 		}
 		else if (sm_req.rtype == SM_REQ_STOP) {
 			/* Note that sm_stop_stream frees the memory of the stream it deletes. */
-			if ( sm_stop_stream(mngr, sm_req.sensor, sm_req.reg) != SM_ERROR )
-				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.reg,
+			if ( sm_stop_stream(mngr, sm_req.sensor, sm_req.ticket) != SM_ERROR )
+				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
 						NULL, NULL);
 				/*
 				 * Note that we do not COAP_STREAM_STOPPED if no stram with
@@ -354,7 +354,7 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 				 * attaching the payload. Do not free pyl because not it
 				 * is needed by the notbuf.
 				 */
-				put_coap_buf_item(notbuf, COAP_SEND_ASYNCH, sm_req.reg,
+				put_coap_buf_item(notbuf, COAP_SEND_ASYNCH, sm_req.ticket,
 						COAP_MESSAGE_NON, pyl);
 			}
 			else {
@@ -365,8 +365,8 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 				 */
 				android_sensor_activate(mngr, sm_req.sensor, DEFAULT_FREQ);
 
-				osreq = sm_new_oneshot(sm_req.reg);
-				LL_APPEND(mngr->sensors[sensor_id].oneshots, osreq);
+				osreq = sm_new_oneshot(sm_req.ticket);
+				LL_APPEND(mngr->sensors[sm_req.sensor].oneshots, osreq);
 			}
 		}
 
@@ -382,7 +382,7 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 		while (queuecount < QUEUE_REQ_RATIO) {
 
 		/* Is this blocking? doesn't seem like.. and that's good. */
-		if (ASensorEventQueue_getEvents(sensorEventQueue, &event, 1) > 0) {
+		if (ASensorEventQueue_getEvents(mngr->sensorEventQueue, &event, 1) > 0) {
 
 			if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
             	LOGI("accel: x=%f y=%f z=%f",
@@ -449,7 +449,7 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 				 * wait but like this*/
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
-					put_coap_buf_item(notbuf, COAP_SEND_NOT,
+					put_coap_buf_item(notbuf, COAP_SEND_NOTIF,
 							stream->reg, COAP_MESSAGE_NON, pyl);
 					/*
 					 * we'll likely need to do some operations here,
@@ -479,8 +479,8 @@ void ze_coap_streaming_thread(stream_context_t *mngr, ze_sm_request_buf_t *smreq
 		/*----------------------Sleep for a while, not much actually-------------------*/
 
 		struct timespec rqtp;
-		sleep.tv_sec = 0;
-		sleep.tv_nsec = 5000000; //1msec
+		rqtp.tv_sec = 0;
+		rqtp.tv_nsec = 5000000; //1msec
 		nanosleep(rqtp, NULL);
 
 	} /*thread loop end*/

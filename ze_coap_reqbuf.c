@@ -31,7 +31,7 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 			temp = buf->rbuf[buf->gethere];
 			//temp.reg = coap_registration_checkout(temp.reg);
 			buf->gethere = ((buf->gethere)+1) % COAP_RBUF_SIZE;
-			counter--;
+			buf->counter--;
 			pthread_cond_signal(buf->notfull); //surely no longer full
 		}
 	pthread_mutex_unlock(buf->mtx);
@@ -40,14 +40,14 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 }
 
 int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
-		coap_ticket_t reg, int conf, ze_payload_t *pyl) {
+		coap_ticket_t ticket, int conf, ze_payload_t *pyl) {
 
 	pthread_mutex_lock(buf->mtx);
 		if (buf->counter >= COAP_RBUF_SIZE) { //full (greater shall not happen)
 			pthread_cond_wait(buf->notfull, buf->mtx);
 		}
 		buf->rbuf[buf->puthere].rtype = rtype;
-		buf->rbuf[buf->puthere].reg = reg;
+		buf->rbuf[buf->puthere].ticket = ticket;
 		buf->rbuf[buf->puthere].conf = conf;
 		buf->rbuf[buf->puthere].pyl = pyl;
 
@@ -59,7 +59,7 @@ int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 		*/
 
 		buf->puthere = ((buf->puthere)+1) % COAP_RBUF_SIZE;
-		counter++;
+		buf->counter++;
 		//pthread_cond_signal(buf->notempty); //surely no longer empty
 	pthread_mutex_unlock(buf->mtx);
 

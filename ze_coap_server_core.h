@@ -23,4 +23,6 @@
 #define COAP_STREAM_STOPPED		70
 #define COAP_SMREQ_INVALID		40
 
+#define SMREQ_RATIO				5
+
 #endif

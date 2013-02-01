@@ -26,11 +26,15 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 	coap_tid_t asyt;
 	coap_resource_t *res;
 	coap_subscription_t *sub = NULL, *subt = NULL;
+	coap_queue_t *nextpdu = NULL;
+	coap_tick_t now;
+	int result;
+	int smcount = 0;
 
 	size_t pdusize = 0;
 
 	unsigned char *pyl = NULL;
-	int plylength = 0;
+	int pyllength = 0;
 
 
 	while (1) { /*----------------------------------------------------*/
@@ -41,16 +45,16 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 	 * then the sets must be reinitialized before each call.
 	 */
 	FD_ZERO(&readfds);
-	FD_SET( ctx->sockfd, &readfds );
+	FD_SET( cctx->sockfd, &readfds );
 
 	/*----------------- Consider retransmissions ------------------------*/
 
-	nextpdu = coap_peek_next( ctx );
+	nextpdu = coap_peek_next( cctx );
 
 	coap_ticks(&now);
 	while ( nextpdu && nextpdu->t <= now ) {
-		coap_retransmit( ctx, coap_pop_next( ctx ) );
-		nextpdu = coap_peek_next( ctx );
+		coap_retransmit( cctx, coap_pop_next( cctx ) );
+		nextpdu = coap_peek_next( cctx );
 	}
 
 	/*---------------------- Serve network requests -------------------*/
@@ -81,9 +85,9 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 		if (errno != EINTR)
 			perror("select");
 	} else if ( result > 0 ) {	/* read from socket */
-		if ( FD_ISSET( ctx->sockfd, &readfds ) ) {
-			coap_read( ctx );	/* read received data */
-			coap_dispatch( ctx );	/* and dispatch PDUs from receivequeue */
+		if ( FD_ISSET( cctx->sockfd, &readfds ) ) {
+			coap_read( cctx );	/* read received data */
+			coap_dispatch( cctx );	/* and dispatch PDUs from receivequeue */
 		}
 	} else {	/* timeout */
 		/* coap_check_resource_list( ctx ); */
@@ -103,7 +107,7 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 	 * Under this model only the CoAP server manages the ticket
 	 */
 
-	if (req.rtpye == COAP_STREAM_STOPPED) {
+	if (req.rtype == COAP_STREAM_STOPPED) {
 		/* We're sure that no other notification will arrive
 		 * with that ticket. Release it on behalf of the streaming
 		 * manager. If there is no ongoing transaction, the registration
@@ -121,12 +125,12 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 
 			/* Build payload. */
 			pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
-			pyl = malloc(pyllegth);
+			pyl = malloc(pyllength);
 			if (pyl == NULL) {
 				LOGW("cannot malloc for payload in server core thread");
 				exit(1);
 			}
-			memcpy(pyl, &(reg.pyl->wts), sizeof(int64_t));
+			memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
 			memcpy(pyl+sizeof(int64_t), &(req.pyl->length), sizeof(int));
 			memcpy(pyl+sizeof(int64_t)+sizeof(int), req.pyl->data, req.pyl->length);
 
@@ -165,12 +169,12 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 		 * could be passed already in this way by the request manager..
 		 */
 		pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
-		pyl = malloc(pyllegth);
+		pyl = malloc(pyllength);
 		if (pyl == NULL) {
 			LOGW("cannot malloc for payload in server core thread");
 			exit(1);
 		}
-		memcpy(pyl, &(reg.pyl->wts), sizeof(int64_t));
+		memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
 		memcpy(pyl+sizeof(int64_t), &(req.pyl->length), sizeof(int));
 		memcpy(pyl+sizeof(int64_t)+sizeof(int), req.pyl->data, req.pyl->length);
 
@@ -227,14 +231,14 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 
 	/* Sleep for a while, not much actually. */
 	struct timespec rqtp;
-	sleep.tv_sec = 0;
-	sleep.tv_nsec = 2000000; //1msec
+	rqtp.tv_sec = 0;
+	rqtp.tv_nsec = 2000000; //1msec
 	nanosleep(rqtp, NULL);
 
 	}
 
 	smcount=0;
-	foundempty=0;
+	//foundempty=0;
 
 	} /*-----------------------------------------------------------------*/
 }

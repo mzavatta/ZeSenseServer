@@ -29,7 +29,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 		 * Put a check anyway, if a sensor is not active
 		 * the streams should be empty
 		 */
-		if (mngr->sensors[sensor_id].sensors != NULL)
+		if (mngr->sensors[sensor_id].sensor != NULL)
 			LOGW("streaming manager inconsistent state");
 
 		android_sensor_activate(mngr, sensor_id, freq);
@@ -156,14 +156,12 @@ ze_stream_t *sm_new_stream(coap_ticket_t reg, int freq) {
 	new->next = NULL;
 	new->reg = reg;
 	new->freq = freq;
-	new->last_rtpts = SM_RTPTS_START;
+	new->last_rtpts = RTP_TS_START;
 
 	return new;
 }
 
 ze_oneshot_t *sm_new_oneshot(coap_ticket_t one) {
-
-	CHECK_OUT_RANGE(sensor_id);
 
 	ze_oneshot_t *new;
 	new = (ze_oneshot_t *) malloc(sizeof(ze_oneshot_t));

@@ -60,7 +60,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	coap_opt_iterator_t opt_iter;
 	coap_opt_t *obopt;
 	coap_registration_t *reg;
-	coap_tid_t asy;
+	coap_async_state_t *asy;
 
 	/* TODO
 	 * Instead of setting 20Hz by default
@@ -126,7 +126,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 					COAP_ASYNC_SEPARATE, NULL);
 
 			put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, ASENSOR_TYPE_ACCELEROMETER,
-					(coap_ticket_t)asy->id, NULL);
+					(coap_ticket_t) asy->id, NULL);
 		}
 	}
 

@@ -74,7 +74,7 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 	else LOGI("success opening %s", logpath);
 
 	/* Initialize the resource tree. */
-	ze_coap_init_resources(context);
+	ze_coap_init_resources(cctx);
 
 
 	/* Fire threads, at last.. */
@@ -113,19 +113,21 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 	smerr = pthread_create(&streaming_manager_thread, NULL,
 			ze_coap_streaming_thread, &smargs);
 	if (smerr != 0) {
-		LOGW("Failed to create thread: %s\n", strerror(error));
+		LOGW("Failed to create thread: %s\n", strerror(smerr));
 		exit(1);
 	}
 
 	coaperr = pthread_create(&coap_server_thread, NULL,
 			ze_coap_server_core_thread, &coapargs);
 	if (coaperr != 0) {
-		LOGW("Failed to create thread: %s\n", strerror(error));
+		LOGW("Failed to create thread: %s\n", strerror(coaperr));
 		exit(1);
 	}
 
 	/* Logging. */
-	if (fputs("Threads launched correctly on ", logfd)<0) LOGW("write failed");
+	time_t lt;
+	lt = time(NULL);
+	if (fputs("Threads launched correctly on \n", logfd)<0) LOGW("write failed");
 	if (fputs(ctime(&lt), logfd)<0) LOGW("write failed");
 
 

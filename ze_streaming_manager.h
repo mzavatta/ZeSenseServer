@@ -150,7 +150,7 @@ inline int CHECK_OUT_RANGE(int sensor) {
 if (sensor<0 || sensor>=ZE_NUMSENSORS) {
 	printf("sensor type out of range");
 	return SM_OUT_RANGE;
-}	}
+}	return 0; }
 
 
 /**

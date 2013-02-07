@@ -10,34 +10,45 @@
  * Olaf Bergmann <bergmann@tzi.org>
  * http://libcoap.sourceforge.net/
  */
-
+#include "ze_log.h"
 #include "ze_coap_server_core.h"
+#include "ze_coap_server_root.h"
+#include "net.h"
+#include "subscribe.h"
+#include "resource.h"
 
-ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
-		ze_coap_request_buf_t *notbuf) {
+void *
+ze_coap_server_core_thread(void *args) {
+
+	LOGI("Hello CoAP server thread! pid%d, tid%d", getpid(), gettid());
+
+	struct coap_thread_args* ar = ((struct coap_thread_args*)(args));
+	coap_context_t *cctx = ar->cctx;
+	ze_sm_request_buf_t *smreqbuf = ar->smreqbuf;
+	ze_coap_request_buf_t *notbuf = ar->notbuf;
+
+	/* Switch on, off. */
+	//pthread_exit(NULL);
+
 
 	fd_set readfds;
 	struct timeval tv, *timeout;
 
 	ze_coap_request_t req;
-	coap_address_t dest;
 	coap_pdu_t *pdu = NULL;
 	coap_async_state_t *asy = NULL, *tmp;
-	coap_tid_t asyt;
+	//coap_tid_t asyt;
 	coap_resource_t *res;
-	coap_subscription_t *sub = NULL, *subt = NULL;
 	coap_queue_t *nextpdu = NULL;
 	coap_tick_t now;
 	int result;
 	int smcount = 0;
 
-	size_t pdusize = 0;
-
 	unsigned char *pyl = NULL;
 	int pyllength = 0;
 
 
-	while (1) { /*----------------------------------------------------*/
+	while (!globalexit) { /*---------------------------------------------*/
 
 	/* Linux man pages:
 	 * Since select() modifies its file descriptor sets,
@@ -57,9 +68,11 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 		nextpdu = coap_peek_next( cctx );
 	}
 
+	LOGI("Retransmissions done for this round..");
+
 	/*---------------------- Serve network requests -------------------*/
 
-	tv.tv_usec = 2000; //2msec
+	tv.tv_usec = 1000000; //1sec
 	tv.tv_sec = 0;
 	timeout = &tv;
 
@@ -86,10 +99,12 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 			perror("select");
 	} else if ( result > 0 ) {	/* read from socket */
 		if ( FD_ISSET( cctx->sockfd, &readfds ) ) {
+			LOGI("Something appeared on the socket, start reading..");
 			coap_read( cctx );	/* read received data */
 			coap_dispatch( cctx );	/* and dispatch PDUs from receivequeue */
 		}
 	} else {	/* timeout */
+		LOGI("select timed out..");
 		/* coap_check_resource_list( ctx ); */
 	}
 
@@ -102,21 +117,23 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 
 	/* Start by fetching an SM request and dispatch it
 	 */
-	req = get_req_buf_item(notbuf);
+	req = get_coap_buf_item(notbuf);
 	/* Recall that the getter does not do any checkout not free
 	 * Under this model only the CoAP server manages the ticket
 	 */
 
 	if (req.rtype == COAP_STREAM_STOPPED) {
+		LOGI("Got a STREAM STOPPED notification");
 		/* We're sure that no other notification will arrive
 		 * with that ticket. Release it on behalf of the streaming
 		 * manager. If there is no ongoing transaction, the registration
 		 * associated to it will be destroyed.
 		 */
-		coap_registration_release(req.ticket.reg);
+		res = coap_get_resource_from_key(cctx, req.ticket.reg->reskey);
+		coap_registration_release(res, req.ticket.reg);
 	}
 	else if (req.rtype == COAP_SEND_ASYNCH) {
-
+		LOGI("Got a SEND ASYNCH notification");
 		/* Lookup in the async register using the ticket tid..
 		 * it shall find it..
 		 */
@@ -142,10 +159,10 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 
 			/* Send message. */
 			if (req.conf == COAP_MESSAGE_CON) {
-				coap_send_confirmed(cctx, asy->peer, pdu);
+				coap_send_confirmed(cctx, &(asy->peer), pdu);
 			}
 			else if (req.conf == COAP_MESSAGE_NON) {
-				coap_send(cctx, asy->peer, pdu);
+				coap_send(cctx, &(asy->peer), pdu);
 			}
 			else LOGW("could not understand message type");
 
@@ -158,9 +175,11 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 		}
 		else LOGW("Got oneshot sample but no asynch request matches the ticket");
 
+		free(req.pyl->data);
+		free(req.pyl);
 	}
 	else if (req.rtype == COAP_SEND_NOTIF) {
-
+		LOGI("Got a SEND NOTIF notification");
 		/* Transfer our payload structure into a series of bytes.
 		 * Sending only the timestamp and the sensor event for the
 		 * moment.
@@ -181,16 +200,17 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 		/* Need to add options in order... */
 		pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
 				coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
-		coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), cctx->observe);
+		coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(cctx->observe));
 		coap_add_option(pdu, COAP_OPTION_TOKEN, req.ticket.reg->token_length, req.ticket.reg->token);
 		coap_add_data(pdu, pyllength, pyl);
 
 		if (req.ticket.reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
+			LOGI("Referenced ticket");
 			/* Either the max NON have been reached or
 			 * we explicitly requested a CON.
 			 * Send a CON and clean the NON counter
 			 */
-			coap_notify_confirmed(cctx, req.ticket.reg->subscriber, pdu,
+			coap_notify_confirmed(cctx, &(req.ticket.reg->subscriber), pdu,
 					coap_registration_checkout(req.ticket.reg) );
 			req.ticket.reg->non_cnt = 0;
 		}
@@ -199,7 +219,7 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 			 * and increase the NON counter
 			 * no need to keep the transaction state
 			 */
-			coap_send(cctx, req.ticket.reg->subscriber, pdu);
+			coap_send(cctx, &(req.ticket.reg->subscriber), pdu);
 			req.ticket.reg->non_cnt++;
 		}
 		else LOGW("Could not understand message type.");
@@ -213,6 +233,8 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 		 */
 		free(pyl);
 
+		free(req.pyl->data);
+		free(req.pyl);
 	}
 	else if (req.rtype == COAP_SMREQ_INVALID) {
 		/* Buffer's empty, do not loop any more times,
@@ -226,14 +248,12 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 	}
 
 	smcount++;
-	free(req.pyl->data);
-	free(req.pyl);
 
 	/* Sleep for a while, not much actually. */
 	struct timespec rqtp;
 	rqtp.tv_sec = 0;
-	rqtp.tv_nsec = 2000000; //1msec
-	nanosleep(rqtp, NULL);
+	rqtp.tv_nsec = 100000000; //100msec
+	nanosleep(&rqtp, NULL);
 
 	}
 
@@ -241,6 +261,8 @@ ze_coap_server_core_thread(coap_context_t *cctx, ze_sm_request_buf_t *smreqbuf,
 	//foundempty=0;
 
 	} /*-----------------------------------------------------------------*/
+
+	LOGI("CoAP server out of thread loop, returning..");
 }
 
 /* token comparison

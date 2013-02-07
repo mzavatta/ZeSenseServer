@@ -22,17 +22,26 @@
 #ifndef ZE_COAP_RESOURCES_H
 #define ZE_COAP_RESOURCES_H
 
-#include "coap.h"
-#include "ze_sm_reqbuf.h"
+#include "pdu.h"
+#include "net.h"
+#include "resource.h"
 
 void ze_coap_init_resources(coap_context_t *context);
 
 
-// Accelerometer
-coap_resource_t * ze_coap_init_accel();
-void accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
+/*--------- Accelerometer --------------------------------------------------*/
+coap_resource_t *
+ze_coap_init_accel();
+
+void
+accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response);
+
+void
+accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
+/*-------------------------------------------------------------------------*/
+
 
 
 #endif

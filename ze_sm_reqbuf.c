@@ -11,6 +11,8 @@
  */
 
 #include "ze_sm_reqbuf.h"
+#include "ze_streaming_manager.h"
+#include "ze_log.h"
 
 
 ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
@@ -22,14 +24,15 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
 
 	ze_sm_request_t temp;
 
-	pthread_mutex_lock(buf->mtx);
+	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter <= 0) { //empty (shall never < 0 anyway)
 			/*
-			 * pthread_cond_wait(buf->notempty, buf->mtx);
+			 * pthread_cond_wait(buf->notempty, &(buf->mtx));
 			 * do nothing, we must not block!
 			 */
 			/* Signal that the buffer is empty by returning
 			 * an invalid request */
+			//LOGI("found empty");
 			temp.rtype = SM_REQ_INVALID;
 		}
 		else {
@@ -40,9 +43,9 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
 			//buf->rbuf[buf->gethere].tkn = NULL; //null the token pointer
 			buf->gethere = ((buf->gethere)+1) % SM_RBUF_SIZE;
 			buf->counter--;
-			pthread_cond_signal(buf->notfull); //surely no longer full
+			pthread_cond_signal(&(buf->notfull)); //surely no longer full
 		}
-	pthread_mutex_unlock(buf->mtx);
+	pthread_mutex_unlock(&(buf->mtx));
 
 	return temp;
 }
@@ -51,9 +54,13 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
 int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 		coap_ticket_t ticket, int freq) {
 
-	pthread_mutex_lock(buf->mtx);
+	LOGI("SM buffer PUT invoked");
+
+	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= SM_RBUF_SIZE) { //full (greater shall not happen)
-			pthread_cond_wait(buf->notfull, buf->mtx);
+			LOGI("Found full");
+			pthread_cond_wait(&(buf->notfull), &(buf->mtx));
+			LOGI("Not full anymore, condvar became true");
 		}
 
 		/* -copy- contents. */
@@ -66,15 +73,15 @@ int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 		buf->puthere = ((buf->puthere)+1) % SM_RBUF_SIZE;
 		buf->counter++;
 		//pthread_cond_signal(buf->notempty); //surely no longer empty
-	pthread_mutex_unlock(buf->mtx);
+	pthread_mutex_unlock(&(buf->mtx));
 
 	return 0;
 }
 
-void init_sm_buf(ze_sm_request_buf_t *buf) {
+ze_sm_request_buf_t* init_sm_buf() {
 
-	buf = malloc(sizeof(ze_sm_request_buf_t));
-	if (buf == NULL) return;
+	ze_sm_request_buf_t *buf = malloc(sizeof(ze_sm_request_buf_t));
+	if (buf == NULL) return NULL;
 
 	memset(buf->rbuf, 0, SM_RBUF_SIZE*sizeof(ze_sm_request_t));
 
@@ -83,14 +90,12 @@ void init_sm_buf(ze_sm_request_buf_t *buf) {
 	 * states that the behavior is not defined, so avoid
 	 * this situation in your programs"
 	 */
-	int error = pthread_mutex_init(buf->mtx, NULL);
+	int error = pthread_mutex_init(&(buf->mtx), NULL);
 	if (error)
-		fprintf(stderr, "Failed to initialize mtx:%s\n", strerror(error));
-
-	error = pthread_cond_init(buf->notfull, NULL);
+		LOGW("Failed to initialize mtx:%s\n", strerror(error));
+	error = pthread_cond_init(&(buf->notfull), NULL);
 	if (error)
-		fprintf(stderr, "Failed to initialize full cond var:%s\n", strerror(error));
-
+		LOGW("Failed to initialize full cond var:%s\n", strerror(error));
 	/*
 	 * error = pthread_cond_init(buf->notempty, NULL);
 	 * if (error)
@@ -101,4 +106,6 @@ void init_sm_buf(ze_sm_request_buf_t *buf) {
 	buf->gethere = 0;
 	buf->puthere = 0;
 	buf->counter = 0;
+
+	return buf;
 }

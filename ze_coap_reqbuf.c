@@ -10,14 +10,16 @@
  * <marco.zavatta@mail.polimi.it>
  */
 
+#include "ze_log.h"
 #include "ze_coap_reqbuf.h"
-
+#include "ze_coap_server_core.h"
+#include "ze_streaming_manager.h"
 
 ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 
 	ze_coap_request_t temp;
 
-	pthread_mutex_lock(buf->mtx);
+	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter <= 0) { //empty (shall never < 0 anyway)
 			/*
 			 * pthread_cond_wait(buf->notempty, buf->mtx);
@@ -32,9 +34,9 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 			//temp.reg = coap_registration_checkout(temp.reg);
 			buf->gethere = ((buf->gethere)+1) % COAP_RBUF_SIZE;
 			buf->counter--;
-			pthread_cond_signal(buf->notfull); //surely no longer full
+			pthread_cond_signal(&(buf->notfull)); //surely no longer full
 		}
-	pthread_mutex_unlock(buf->mtx);
+	pthread_mutex_unlock(&(buf->mtx));
 
 	return temp;
 }
@@ -42,9 +44,11 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 		coap_ticket_t ticket, int conf, ze_payload_t *pyl) {
 
-	pthread_mutex_lock(buf->mtx);
+	LOGI("CoAP buffer PUT invoked");
+
+	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= COAP_RBUF_SIZE) { //full (greater shall not happen)
-			pthread_cond_wait(buf->notfull, buf->mtx);
+			pthread_cond_wait(&(buf->notfull), &(buf->mtx));
 		}
 		buf->rbuf[buf->puthere].rtype = rtype;
 		buf->rbuf[buf->puthere].ticket = ticket;
@@ -61,15 +65,15 @@ int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 		buf->puthere = ((buf->puthere)+1) % COAP_RBUF_SIZE;
 		buf->counter++;
 		//pthread_cond_signal(buf->notempty); //surely no longer empty
-	pthread_mutex_unlock(buf->mtx);
+	pthread_mutex_unlock(&(buf->mtx));
 
 	return 0;
 }
 
-void init_coap_buf(ze_coap_request_buf_t *buf) {
+ze_coap_request_buf_t* init_coap_buf() {
 
-	buf = malloc(sizeof(ze_coap_request_buf_t));
-	if (buf == NULL) return;
+	ze_coap_request_buf_t *buf = malloc(sizeof(ze_coap_request_buf_t));
+	if (buf == NULL) return NULL;
 
 	memset(buf->rbuf, 0, COAP_RBUF_SIZE*sizeof(ze_coap_request_t));
 
@@ -78,13 +82,13 @@ void init_coap_buf(ze_coap_request_buf_t *buf) {
 	 * states that the behavior is not defined, so avoid
 	 * this situation in your programs"
 	 */
-	int error = pthread_mutex_init(buf->mtx, NULL);
+	int error = pthread_mutex_init(&(buf->mtx), NULL);
 	if (error)
-		fprintf(stderr, "Failed to initialize mtx:%s\n", strerror(error));
+		LOGW("Failed to initialize mtx:%s\n", strerror(error));
 
-	error = pthread_cond_init(buf->notfull, NULL);
+	error = pthread_cond_init(&(buf->notfull), NULL);
 	if (error)
-		fprintf(stderr, "Failed to initialize full cond var:%s\n", strerror(error));
+		LOGW("Failed to initialize full cond var:%s\n", strerror(error));
 
 	/*
 	 * error = pthread_cond_init(buf->notempty, NULL);
@@ -96,4 +100,6 @@ void init_coap_buf(ze_coap_request_buf_t *buf) {
 	buf->gethere = 0;
 	buf->puthere = 0;
 	buf->counter = 0;
+
+	return buf;
 }

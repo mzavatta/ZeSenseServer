@@ -31,21 +31,46 @@
 #include <signal.h>
 
 #include "config.h"
-#include "resource.h"
-#include "coap.h"
-
-#include "ze_coap_resources.h"
-#include "ze_coap_server_core.h"
+#include "net.h"
+#include "ze_coap_reqbuf.h"
+#include "ze_sm_reqbuf.h"
 #include "ze_streaming_manager.h"
+//#include "coap.h"
+#include <jni.h>
 
-#include "ze_log.h"
-
-// Server endpoint coordinates
+/* Server endpoint coordinates. */
 #define SERVER_IP "192.168.43.1"	//Wifi hotspot interface
 //#define SERVER_IP "10.0.2.15" 	//Android emulator interface
 #define SERVER_PORT "5683"
 
-// Start function
-int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1example_1main();
+/* Stuctures to wrap parameters for threads.*/
+struct sm_thread_args {
+	stream_context_t *smctx;
+	ze_sm_request_buf_t *smreqbuf;
+	ze_coap_request_buf_t *notbuf;
+};
+struct coap_thread_args {
+	coap_context_t  *cctx;
+	ze_sm_request_buf_t *smreqbuf;
+	ze_coap_request_buf_t *notbuf;
+};
+
+/* Global quit flag.
+ * No use of synch primitives as an integer
+ * read or write operation should be atomic.
+ */
+int globalexit;
+
+/* Only for testing purposes. */
+int go;
+
+//jint
+//Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz);
+
+int
+ze_coap_server_root(JNIEnv* env, jobject thiz);
+
+coap_context_t *
+get_context(const char *node, const char *port);
 
 #endif

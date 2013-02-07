@@ -14,31 +14,16 @@
 #define ZE_COAP_REQBUF_H
 
 #include <pthread.h>
-
-#include "ze_streaming_manager.h"
 #include "ze_payload.h"
+#include "asynchronous.h"
 
 /* Buffer size */
 #define COAP_RBUF_SIZE		20
 
+#define ZE_PARAM_UNDEFINED	(-1)
+
 struct ze_coap_request_buf_t;
 struct ze_coap_request_t;
-
-typedef struct ze_coap_request_buf_t {
-
-	ze_coap_request_t rbuf[COAP_RBUF_SIZE];
-
-	/* Indexes, wrap around according to %COAP_RBUF_SIZE*/
-	int gethere, puthere;
-
-	/* Item counter, does not wrap around */
-	int counter;
-
-	/* Thread synch (no need of the empty condition) */
-	pthread_mutex_t mtx;
-	pthread_cond_t notfull;
-	//pthread_cond_t notempty;
-} ze_coap_request_buf_t;
 
 typedef struct ze_coap_request_t {
 	/* Request type */
@@ -63,6 +48,22 @@ typedef struct ze_coap_request_t {
 	 * pointer, pyl->data with heap memory attached to it
 	 */
 } ze_coap_request_t;
+
+typedef struct ze_coap_request_buf_t {
+
+	ze_coap_request_t rbuf[COAP_RBUF_SIZE];
+
+	/* Indexes, wrap around according to %COAP_RBUF_SIZE*/
+	int gethere, puthere;
+
+	/* Item counter, does not wrap around */
+	int counter;
+
+	/* Thread synch (no need of the empty condition) */
+	pthread_mutex_t mtx;
+	pthread_cond_t notfull;
+	//pthread_cond_t notempty;
+} ze_coap_request_buf_t;
 
 /**
  * To fit our purposes:
@@ -102,7 +103,7 @@ int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 		coap_ticket_t reg, int conf, ze_payload_t *pyl);
 
 
-void init_coap_buf(ze_coap_request_buf_t *buf);
+ze_coap_request_buf_t* init_coap_buf();
 
 
 #endif

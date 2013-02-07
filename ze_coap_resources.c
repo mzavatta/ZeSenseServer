@@ -10,11 +10,16 @@
  * Olaf Bergmann <bergmann@tzi.org>
  * http://libcoap.sourceforge.net/
  */
-
+#include "ze_log.h"
 #include "ze_coap_resources.h"
+#include "ze_sm_reqbuf.h"
+#include "ze_streaming_manager.h"
+#include "async.h"
 
 void
 ze_coap_init_resources(coap_context_t *context) {
+
+	LOGI("Initializing resources..");
 
 	coap_resource_t *r = NULL;
 
@@ -29,6 +34,8 @@ ze_coap_init_resources(coap_context_t *context) {
 coap_resource_t *
 ze_coap_init_accel() {
 
+	LOGI("Initializing accel..");
+
 	coap_resource_t *r;
 
 	r = coap_resource_init((unsigned char *)"accel", 5, 0);
@@ -37,7 +44,7 @@ ze_coap_init_accel() {
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
 	/* Need to register on_unregister() handler. */
-	r->on_unregister = accel_on_unregister;
+	r->on_unregister = &accel_on_unregister;
 
 	r->observable = 1;
 
@@ -56,6 +63,8 @@ void
 accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response) {
+
+	LOGI("Recognized accelerometer GET request, entered handler!");
 
 	coap_opt_iterator_t opt_iter;
 	coap_opt_t *obopt;
@@ -92,7 +101,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 			 * in which case there might be a STREAM STOPPED message on the fly,
 			 * either still in the other thread's body or in the other queue.. */
 			put_sm_buf_item(context->smreqbuf, SM_REQ_START, ASENSOR_TYPE_ACCELEROMETER,
-					(coap_ticket_t)coap_registration_ceckout(reg), freq);
+					(coap_ticket_t)coap_registration_checkout(reg), freq);
 
 
 			if (request->hdr->type == COAP_MESSAGE_CON) {
@@ -126,7 +135,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 					COAP_ASYNC_SEPARATE, NULL);
 
 			put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, ASENSOR_TYPE_ACCELEROMETER,
-					(coap_ticket_t) asy->id, NULL);
+					(coap_ticket_t)(asy->id), 0);
 		}
 	}
 
@@ -137,7 +146,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 				COAP_ASYNC_SEPARATE, NULL);
 
 		put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, ASENSOR_TYPE_ACCELEROMETER,
-				(coap_ticket_t)asy->id, NULL);
+				(coap_ticket_t)asy->id, 0);
 
 		/* As per CoAP observer draft, clear this registration.
 		 * This must be done through the streaming manager
@@ -155,6 +164,8 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 void
 accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
+	LOGI("Accelerometer on_unregister entered..");
+
 	/*
 	 * Unregistration must be done through the streaming manager
 	 * SM_REQ_STOP, passing the ticket of the registration.
@@ -165,6 +176,6 @@ accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 	 * with that ticket (should not happen) it confirms the cancellation anyways.
 	 */
 	put_sm_buf_item(ctx->smreqbuf, SM_REQ_STOP, ASENSOR_TYPE_ACCELEROMETER,
-			coap_registration_checkout(reg), NULL);
+			(coap_ticket_t)coap_registration_checkout(reg), 0);
 
 }

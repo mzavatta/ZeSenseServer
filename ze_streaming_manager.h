@@ -12,8 +12,12 @@
 #define ZE_STREAMING_MANAGER_H
 
 #include <android/sensor.h>
-#include "coap.h"
-#include "ze_coap_server_core.h"
+//#include "coap.h"
+
+#include "pdu.h"
+#include "net.h"
+#include "address.h"
+#include "asynchronous.h"
 #include "ze_coap_reqbuf.h"
 #include "ze_sm_reqbuf.h"
 #include "ze_log.h"
@@ -55,39 +59,40 @@
 #define TRUE 	0
 #define FALSE 	1
 
-typedef union coap_ticket_u coap_ticket_t;
-union coap_ticket_u {
-	/* Ticket corresponding to the underlying registration.*/
-	coap_registration_t *reg;
-
-	/* Ticket corresponding to the underlying asynchronous request. */
-	coap_tid_t tid;
-};
-
 struct stream_context_t;
 
-/**
- * Streaming Manager's global context
- * Array indexes mirror Android-defined sensor types
- */
-typedef struct stream_context_t {
-	/* Sensors sources available for streaming */
-	ze_sensor_t sensors[ZE_NUMSENSORS];
+typedef struct ze_oneshot_t {
+	struct ze_oneshot_t *next;
 
-	/* The server we're sending the streams through.
-	 * Don't think we need it.. we need the two buffers,
-	 * yes, but function parameters are designed to
-	 * take them directly (unlike libcoap functions
-	 * that came without the knowledge of the buffers
-	 * and the Streaming Manager thus taking
-	 * only coap_context_t as parameter..) */
-	//coap_context_t *server;
+	/* Ticket that identifies the oneshot request
+	 * when interacting with the CoAP server.
+	 */
+	coap_ticket_t one;
+} ze_oneshot_t;
 
-	/* Android sensor infrastructure */
-	ASensorManager* sensorManager;
-	ASensorEventQueue* sensorEventQueue;
-	ALooper* looper;
-} stream_context_t;
+typedef struct ze_stream_t {
+	struct ze_stream_t *next;
+
+	/* Ticket that identifies the stream
+	 * when interacting with the CoAP server.
+	 */
+	coap_ticket_t reg;
+
+	/* In some way this is the lookup key,
+	 * no two elements with the same dest will be present in the list
+	 * as mandated by draft-coap-observe-7
+	 * not anymore, it's managed differently now
+	 */
+	//coap_address_t dest;
+
+	/* Client specified frequency */
+	int freq;
+
+	/* Streaming Manager local status variables. */
+	int last_wts;	//Last wallclock timestamp
+	int last_rtpts;	//Last RTP timestamp
+	int freq_div;	//Frequency divider
+} ze_stream_t;
 
 typedef struct ze_sensor_t {
 	/* Association sensor-resource */
@@ -113,45 +118,40 @@ typedef struct ze_sensor_t {
 	int last_rtpts;
 } ze_sensor_t;
 
-typedef struct ze_stream_t {
-	ze_stream_t *next;
+/**
+ * Streaming Manager's global context
+ * Array indexes mirror Android-defined sensor types
+ */
+typedef struct stream_context_t {
+	/* Sensors sources available for streaming */
+	ze_sensor_t sensors[ZE_NUMSENSORS];
 
-	/* Ticket that identifies the stream
-	 * when interacting with the CoAP server.
-	 */
-	coap_ticket_t reg;
+	/* The server we're sending the streams through.
+	 * Don't think we need it.. we need the two buffers,
+	 * yes, but function parameters are designed to
+	 * take them directly (unlike libcoap functions
+	 * that came without the knowledge of the buffers
+	 * and the Streaming Manager thus taking
+	 * only coap_context_t as parameter..) */
+	//coap_context_t *server;
 
-	/* In some way this is the lookup key,
-	 * no two elements with the same dest will be present in the list
-	 * as mandated by draft-coap-observe-7
-	 * not anymore, it's managed differently now
-	 */
-	//coap_address_t dest;
+	/* Android sensor infrastructure */
+	ASensorManager* sensorManager;
+	ASensorEventQueue* sensorEventQueue;
+	ALooper* looper;
+} stream_context_t;
 
-	/* Client specified frequency */
-	int freq;
-
-	/* Streaming Manager local status variables. */
-	int last_wts;	//Last wallclock timestamp
-	int last_rtpts;	//Last RTP timestamp
-	int freq_div;	//Frequency divider
-} ze_stream_t;
-
-typedef struct ze_oneshot_t {
-	ze_oneshot_t *next;
-
-	/* Ticket that identifies the oneshot request
-	 * when interacting with the CoAP server.
-	 */
-	coap_ticket_t one;
-} ze_oneshot_t;
-
+/*
 inline int CHECK_OUT_RANGE(int sensor) {
 if (sensor<0 || sensor>=ZE_NUMSENSORS) {
-	printf("sensor type out of range");
+	LOGW("sensor type out of range");
 	return SM_OUT_RANGE;
 }	return 0; }
+*/
 
+
+void *
+ze_coap_streaming_thread(void* args);
 
 /**
  * Binds a sensor source @p sensor_id to a specific @p URI.
@@ -173,7 +173,13 @@ int sm_bind_source(stream_context_t *mngr, int sensor_id, str uri);
  * Binds the given @p server to Streaming Manager @p mngr
  * in order to relay notifications to him.
  */
-int sm_bind_server(stream_context_t *mngr, coap_context_t *server);
+//int sm_bind_server(stream_context_t *mngr, coap_context_t *server);
+
+
+ze_stream_t *sm_new_stream(coap_ticket_t reg, int freq);
+
+ze_stream_t *
+sm_find_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg);
 
 /**
  * Starts a stream of notifications of samples
@@ -216,7 +222,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id, coap_ticket_
  * (e.g. the stream does not exist)
  * @c SM_OUT_RANGE if @p sensor_id is out of bound
  */
-int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_address_t dest);
+int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg);
 
 /**
  * Checks if a stream from @p sensor_id to destination @p dest
@@ -270,10 +276,24 @@ int sm_is_streaming(stream_context_t *mngr, int sensor_id, coap_address_t dest);
  *
  * @return Zero on success, @c SM_ERROR on failure
  */
-int sm_new_oneshot(stream_context_t *mngr, int sensor_id, coap_address_t dest,
-		int tokenlen, unsigned char *token);
+/*int
+sm_new_oneshot(stream_context_t *mngr, int sensor_id, coap_address_t dest,
+		int tokenlen, unsigned char *token);*/
 
 
-stream_context_t *get_streaming_manager(/*coap_context_t  *cctx*/);
+ze_oneshot_t *
+sm_new_oneshot(coap_ticket_t one);
+
+stream_context_t *
+get_streaming_manager(/*coap_context_t  *cctx*/);
+
+int
+android_sensor_activate(stream_context_t *mngr, int sensor, int freq);
+
+int
+android_sensor_changef(stream_context_t *mngr, int sensor, int freq);
+
+int
+android_sensor_turnoff(stream_context_t *mngr, int sensor);
 
 #endif

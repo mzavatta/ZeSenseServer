@@ -14,9 +14,6 @@
 #ifndef ZE_COAP_SERVER_CORE_H
 #define ZE_COAP_SERVER_CORE_H
 
-#include "ze_coap_server_root.h"
-#include "ze_coap_reqbuf.h"
-
 /* Request codes from the Sensor Manager. */
 #define COAP_SEND_NOTIF			50
 #define COAP_SEND_ASYNCH		60
@@ -24,5 +21,12 @@
 #define COAP_SMREQ_INVALID		40
 
 #define SMREQ_RATIO				5
+
+#include "net.h"
+#include "ze_coap_reqbuf.h"
+#include "ze_sm_reqbuf.h"
+
+void *
+ze_coap_server_core_thread(void *args);
 
 #endif

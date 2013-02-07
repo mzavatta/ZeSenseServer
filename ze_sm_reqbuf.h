@@ -14,30 +14,11 @@
 #define ZE_SM_REQBUF_H
 
 #include <pthread.h>
-#include "ze_streaming_manager.h"
-
+#include "asynchronous.h"
 
 /* Buffer size */
 #define SM_RBUF_SIZE		20
 
-struct ze_sm_request_buf_t;
-struct ze_sm_request_t;
-
-typedef struct ze_sm_request_buf_t {
-
-	ze_sm_request_t rbuf[SM_RBUF_SIZE];
-
-	/* Indexes, wrap around according to %SM_RBUF_SIZE*/
-	int gethere, puthere;
-
-	/* Item counter, does not wrap around */
-	int counter;
-
-	/* Thread synch (no need of the empty condition) */
-	pthread_mutex_t mtx;
-	pthread_cond_t notfull;
-	//pthread_cond_t notempty;
-} ze_sm_request_buf_t;
 
 typedef struct ze_sm_request_t {
 	/* Request type */
@@ -56,8 +37,21 @@ typedef struct ze_sm_request_t {
 	*/
 } ze_sm_request_t;
 
+typedef struct ze_sm_request_buf_t {
 
+	ze_sm_request_t rbuf[SM_RBUF_SIZE];
 
+	/* Indexes, wrap around according to %SM_RBUF_SIZE*/
+	int gethere, puthere;
+
+	/* Item counter, does not wrap around */
+	int counter;
+
+	/* Thread synch (no need of the empty condition) */
+	pthread_mutex_t mtx;
+	pthread_cond_t notfull;
+	//pthread_cond_t notempty;
+} ze_sm_request_buf_t;
 
 
 /**
@@ -96,6 +90,6 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf);
 int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor, /*coap_address_t dest,*/
 		coap_ticket_t reg, int freq/*, int tknlen, unsigned char *tkn*/);
 
-void init_sm_buf(ze_sm_request_buf_t *buf);
+ze_sm_request_buf_t* init_sm_buf();
 
 #endif

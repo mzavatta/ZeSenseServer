@@ -12,24 +12,26 @@
  */
 
 #include "ze_coap_server_root.h"
+#include "resource.h"
+#include "ze_coap_resources.h"
+#include "ze_coap_server_core.h"
+#include "ze_streaming_manager.h"
+#include <jni.h>
+#include "ze_log.h"
+
+/* Log file handle. */
+FILE *logfd;
+
+//jint
+//Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz) {
+int
+ze_coap_server_root(JNIEnv* env, jobject thiz) {
+
+	LOGI("ZeSense new CoAP server hello, pid%d, tid%d", getpid(), gettid());
+	pthread_setname_np(pthread_self(), "ZeRoot");
 
 
-struct sm_thread_args {
-	stream_context_t *smctx;
-	ze_sm_request_buf_t *smreqbuf;
-	ze_coap_request_buf_t *notbuf;
-};
-
-struct coap_thread_args {
-	coap_context_t  *cctx;
-	ze_sm_request_buf_t *smreqbuf;
-	ze_coap_request_buf_t *notbuf;
-};
-
-
-int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
-
-	LOGI("ZeSense new CoAP server hello!");
+	//pthread_exit(NULL);
 
 	/* Spawn *all* the threads from here, this thread has no other function
 	 * except for instantiating the CoAP, SM contexts and the two buffers
@@ -41,25 +43,29 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 	/* Contexts and buffers; NEVER to reallocate, move or free because
 	 * they are shared among threads! unless we use
 	 * reference counting */
-	coap_context_t  *cctx;
+	coap_context_t  *cctx = NULL;
 	cctx = get_context(SERVER_IP, SERVER_PORT);
-	if (!cctx)
+	if (cctx == NULL)
 		return -1;
+	LOGI("Root, got cctx");
 
-	stream_context_t *smctx;
+	stream_context_t *smctx = NULL;
 	smctx = get_streaming_manager(/*may want to parametrize*/);
-	if (!smctx)
+	if (smctx == NULL)
 		return -1;
+	LOGI("Root, got smctx");
 
-	ze_sm_request_buf_t *smreqbuf;
-	init_sm_req_buf(smreqbuf);
-	if (!smreqbuf)
+	ze_sm_request_buf_t *smreqbuf = NULL;
+	smreqbuf = init_sm_buf();
+	if (smreqbuf == NULL)
 		return -1;
+	LOGI("Root, got smreqbuf");
 
-	ze_coap_request_buf_t *notbuf;
-	init_coap_req_buf(notbuf);
-	if (!notbuf)
+	ze_coap_request_buf_t *notbuf = NULL;
+	notbuf = init_coap_buf();
+	if (notbuf == NULL)
 		return -1;
+	LOGI("Root, got notbuf");
 
 	cctx->notbuf = notbuf;
 	cctx->smreqbuf = smreqbuf;
@@ -69,13 +75,13 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 	logfd = fopen(logpath,"ab");
 	if(logfd == NULL) {
 		LOGW("unable to open %s", logpath);
-		exit(1);
+		return -1;
 	}
 	else LOGI("success opening %s", logpath);
 
 	/* Initialize the resource tree. */
 	ze_coap_init_resources(cctx);
-
+	LOGI("Root, resources initialized");
 
 	/* Fire threads, at last.. */
 	/*
@@ -95,6 +101,7 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 	 * The Streaming Manager is tailored for the use of the buffers
 	 * so we can give the references in a separate way.
 	 */
+	globalexit = 0;
 
 	int smerr, coaperr;
 
@@ -116,6 +123,8 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 		LOGW("Failed to create thread: %s\n", strerror(smerr));
 		exit(1);
 	}
+	LOGI("Root, launched streaming manager thread.");
+	pthread_setname_np(streaming_manager_thread, "StreamingMngr");
 
 	coaperr = pthread_create(&coap_server_thread, NULL,
 			ze_coap_server_core_thread, &coapargs);
@@ -123,6 +132,9 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 		LOGW("Failed to create thread: %s\n", strerror(coaperr));
 		exit(1);
 	}
+	LOGI("Root, launched CoAP server thread.");
+	pthread_setname_np(coap_server_thread, "CoAPServer");
+
 
 	/* Logging. */
 	time_t lt;
@@ -130,16 +142,29 @@ int Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root() {
 	if (fputs("Threads launched correctly on \n", logfd)<0) LOGW("write failed");
 	if (fputs(ctime(&lt), logfd)<0) LOGW("write failed");
 
+	/* Wait for an exit request from the Java world and spread it
+	 * to other threads. */
+	jclass servclass = (*env)->FindClass(env, "java/lang/Thread");
+	jmethodID inted = (*env)->GetMethodID(env, servclass, "isInterrupted", "()Z");
+	while (!globalexit) {
+		sleep(1);
+		jboolean status = (*env)->CallBooleanMethod(env, thiz, inted);
+		if (status == JNI_TRUE) globalexit = 1;
+	}
+	LOGI("Root, global exit requested, waiting global join.");
 
-	/* Rejoin our children, otherwise the variables we've
+	/* Rejoin our children before closing, otherwise the variables we've
 	 * created will go out of scope.. */
 	int *exitcode;
 	pthread_join(streaming_manager_thread, &exitcode);
-	pthread_join(ze_coap_server_core_thread, &exitcode);
+	pthread_join(coap_server_thread, &exitcode);
+
+	return 1;
 }
 
 
-/* Interprets IP & Port on which opens and binds a socket. */
+
+/* Interprets IP/port on which opens and binds a socket. */
 coap_context_t *
 get_context(const char *node, const char *port) {
   coap_context_t *ctx = NULL;
@@ -154,7 +179,7 @@ get_context(const char *node, const char *port) {
 
   s = getaddrinfo(node, port, &hints, &result);
   if ( s != 0 ) {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+    LOGW("getaddrinfo: %s\n", gai_strerror(s));
     return NULL;
   }
 
@@ -175,7 +200,7 @@ get_context(const char *node, const char *port) {
     }
   }
 
-  fprintf(stderr, "no context available for interface '%s'\n", node);
+  LOGW("no context available for interface '%s'\n", node);
 
  finish:
   freeaddrinfo(result);

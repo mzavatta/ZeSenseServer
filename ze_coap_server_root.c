@@ -159,6 +159,12 @@ ze_coap_server_root(JNIEnv* env, jobject thiz) {
 	pthread_join(streaming_manager_thread, &exitcode);
 	pthread_join(coap_server_thread, &exitcode);
 
+	/* Free the four app components. */
+	free(cctx);
+	free(smctx);
+	free(smreqbuf);
+	free(notbuf);
+
 	return 1;
 }
 

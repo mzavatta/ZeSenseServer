@@ -68,11 +68,11 @@ ze_coap_server_core_thread(void *args) {
 		nextpdu = coap_peek_next( cctx );
 	}
 
-	LOGI("Retransmissions done for this round..");
+	//LOGI("Retransmissions done for this round..");
 
 	/*---------------------- Serve network requests -------------------*/
 
-	tv.tv_usec = 1000000; //1sec
+	tv.tv_usec = 10000; //10msec
 	tv.tv_sec = 0;
 	timeout = &tv;
 
@@ -99,12 +99,12 @@ ze_coap_server_core_thread(void *args) {
 			perror("select");
 	} else if ( result > 0 ) {	/* read from socket */
 		if ( FD_ISSET( cctx->sockfd, &readfds ) ) {
-			LOGI("Something appeared on the socket, start reading..");
+			LOGI("CS Something appeared on the socket, start reading..");
 			coap_read( cctx );	/* read received data */
 			coap_dispatch( cctx );	/* and dispatch PDUs from receivequeue */
 		}
 	} else {	/* timeout */
-		LOGI("select timed out..");
+		//LOGI("select timed out..");
 		/* coap_check_resource_list( ctx ); */
 	}
 
@@ -123,7 +123,7 @@ ze_coap_server_core_thread(void *args) {
 	 */
 
 	if (req.rtype == COAP_STREAM_STOPPED) {
-		LOGI("Got a STREAM STOPPED notification");
+		LOGI("CS Got a STREAM STOPPED command");
 		/* We're sure that no other notification will arrive
 		 * with that ticket. Release it on behalf of the streaming
 		 * manager. If there is no ongoing transaction, the registration
@@ -133,7 +133,7 @@ ze_coap_server_core_thread(void *args) {
 		coap_registration_release(res, req.ticket.reg);
 	}
 	else if (req.rtype == COAP_SEND_ASYNCH) {
-		LOGI("Got a SEND ASYNCH notification");
+		LOGI("CS Got a SEND ASYNCH command");
 		/* Lookup in the async register using the ticket tid..
 		 * it shall find it..
 		 */
@@ -144,7 +144,7 @@ ze_coap_server_core_thread(void *args) {
 			pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
 			pyl = malloc(pyllength);
 			if (pyl == NULL) {
-				LOGW("cannot malloc for payload in server core thread");
+				LOGW("CS cannot malloc for payload in server core thread");
 				exit(1);
 			}
 			memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
@@ -159,80 +159,113 @@ ze_coap_server_core_thread(void *args) {
 
 			/* Send message. */
 			if (req.conf == COAP_MESSAGE_CON) {
+				LOGI("CS Sending confirmable message");
 				coap_send_confirmed(cctx, &(asy->peer), pdu);
 			}
 			else if (req.conf == COAP_MESSAGE_NON) {
+				LOGI("CS Sending non confirmable message");
 				coap_send(cctx, &(asy->peer), pdu);
+				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
+				free(pyl);
 			}
-			else LOGW("could not understand message type");
-
-			coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
-			free(pyl);
+			else LOGW("CS could not understand message type");
 
 			/* Asynchronous request satisfied, regardless of whether
 			 * a CON and an ACK will arrive, remove it. */
 			coap_remove_async(cctx, asy->id, &tmp);
 		}
-		else LOGW("Got oneshot sample but no asynch request matches the ticket");
+		else LOGW("CS Got oneshot sample but no asynch request matches the ticket");
 
 		free(req.pyl->data);
 		free(req.pyl);
 	}
 	else if (req.rtype == COAP_SEND_NOTIF) {
-		LOGI("Got a SEND NOTIF notification");
-		/* Transfer our payload structure into a series of bytes.
-		 * Sending only the timestamp and the sensor event for the
-		 * moment.
-		 * TODO: optimize it so that we don't create another copy
-		 * and it need not malloc every loop
-		 * could be passed already in this way by the request manager..
+		LOGI("CS Got a SEND NOTIF command");
+
+		/* Here I have to check if the registration
+		 * that corresponds to the ticket is still
+		 * valid. It may be, indeed, that the failcount
+		 * has topped, a stopstream request has been
+		 * issued, but some previous send commands
+		 * are still in the buffer. So we must protect
+		 * and do not send notifications belonging
+		 * to a registration that is already invalidated
+		 * and in the process of being destroyed.
+		 * What do we do with its ticket? As we don't
+		 * pass it along to anybody and the official
+		 * destruction will arrive later through a
+		 * STREAM STOPPED confirmation, just forget
+		 * about it.
 		 */
-		pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
-		pyl = malloc(pyllength);
-		if (pyl == NULL) {
-			LOGW("cannot malloc for payload in server core thread");
-			exit(1);
-		}
-		memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
-		memcpy(pyl+sizeof(int64_t), &(req.pyl->length), sizeof(int));
-		memcpy(pyl+sizeof(int64_t)+sizeof(int), req.pyl->data, req.pyl->length);
+		if (req.ticket.reg->fail_cnt <= COAP_OBS_MAX_FAIL) {
 
-		/* Need to add options in order... */
-		pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
-				coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
-		coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(cctx->observe));
-		coap_add_option(pdu, COAP_OPTION_TOKEN, req.ticket.reg->token_length, req.ticket.reg->token);
-		coap_add_data(pdu, pyllength, pyl);
-
-		if (req.ticket.reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
-			LOGI("Referenced ticket");
-			/* Either the max NON have been reached or
-			 * we explicitly requested a CON.
-			 * Send a CON and clean the NON counter
+			/* Transfer our payload structure into a series of bytes.
+			 * Sending only the timestamp and the sensor event for the
+			 * moment.
+			 * TODO: optimize it so that we don't create another copy
+			 * and it need not malloc every loop
+			 * could be passed already in this way by the request manager..
 			 */
-			coap_notify_confirmed(cctx, &(req.ticket.reg->subscriber), pdu,
-					coap_registration_checkout(req.ticket.reg) );
-			req.ticket.reg->non_cnt = 0;
-		}
-		else if (req.conf == COAP_MESSAGE_NON) {
-			/* send a non-confirmable
-			 * and increase the NON counter
-			 * no need to keep the transaction state
-			 */
-			coap_send(cctx, &(req.ticket.reg->subscriber), pdu);
-			req.ticket.reg->non_cnt++;
-		}
-		else LOGW("Could not understand message type.");
+			pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
+			pyl = malloc(pyllength);
+			if (pyl == NULL) {
+				LOGW("CS cannot malloc for payload in server core thread");
+				exit(1);
+			}
+			memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
+			memcpy(pyl+sizeof(int64_t), &(req.pyl->length), sizeof(int));
+			memcpy(pyl+sizeof(int64_t)+sizeof(int), req.pyl->data, req.pyl->length);
 
-		coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
-		/* Even if pyl is a pointer to char, it does not
-		 * free only one byte. The heap manager stores
-		 * when doing malloc() the number of bytes it allocated
-		 * nearby the allocated block. So free will know
-		 * how many bytes to deallocate.
+			/* Need to add options in order... */
+			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
+					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
+			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(cctx->observe));
+			coap_add_option(pdu, COAP_OPTION_TOKEN, req.ticket.reg->token_length, req.ticket.reg->token);
+			coap_add_data(pdu, pyllength, pyl);
+
+			if (req.ticket.reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
+				/* Either the max NON have been reached or
+				 * we explicitly requested a CON.
+				 * Send a CON and clean the NON counter
+				 */
+				LOGI("CS Sending confirmable notification");
+				coap_notify_confirmed(cctx, &(req.ticket.reg->subscriber), pdu,
+						coap_registration_checkout(req.ticket.reg) );
+				req.ticket.reg->non_cnt = 0;
+			}
+			else if (req.conf == COAP_MESSAGE_NON) {
+				/* send a non-confirmable
+				 * and increase the NON counter
+				 * no need to keep the transaction state
+				 */
+				LOGI("CS Sending non confirmable notification");
+				coap_send(cctx, &(req.ticket.reg->subscriber), pdu);
+				req.ticket.reg->non_cnt++;
+
+				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
+				free(pyl);
+			}
+			else LOGW("CS Could not understand message type.");
+
+
+			/* Even if pyl is a pointer to char, it does not
+			 * free only one byte. The heap manager stores
+			 * when doing malloc() the number of bytes it allocated
+			 * nearby the allocated block. So free will know
+			 * how many bytes to deallocate.
+			 * Still, we don't have to free it as it is referenced
+			 * in the transaction record in case of confirmable
+			 * message. Well, we do have to free if if we're not
+			 * sending a confirmable.
+			 */
+			//coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
+			//free(pyl);
+		}
+		else LOGI("Not sending notification, registration already invalid.");
+
+		/* These are different from pyl because we do a copy,
+		 * so free them in any case.
 		 */
-		free(pyl);
-
 		free(req.pyl->data);
 		free(req.pyl);
 	}
@@ -243,7 +276,7 @@ ze_coap_server_core_thread(void *args) {
 		//foundempty = 1;
 	}
 	else {
-		LOGW("Cannot interpret SM request type");
+		LOGW("CS Cannot interpret SM request type");
 		exit(1);
 	}
 
@@ -252,7 +285,7 @@ ze_coap_server_core_thread(void *args) {
 	/* Sleep for a while, not much actually. */
 	struct timespec rqtp;
 	rqtp.tv_sec = 0;
-	rqtp.tv_nsec = 100000000; //100msec
+	rqtp.tv_nsec = 1000000; //1msec
 	nanosleep(&rqtp, NULL);
 
 	}

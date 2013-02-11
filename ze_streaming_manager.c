@@ -78,6 +78,8 @@ ze_coap_streaming_thread(void* args) {
 	ze_oneshot_t *osreq = NULL;
 	ze_stream_t *stream = NULL;
 
+	ze_oneshot_t *onescroll = NULL;
+
 	/* To control the time spent on streaming
 	 * wrt the time spent on serving requests
 	 */
@@ -111,7 +113,7 @@ ze_coap_streaming_thread(void* args) {
 				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
 						ZE_PARAM_UNDEFINED, NULL);
 				/*
-				 * Note that we do not COAP_STREAM_STOPPED if no stram with
+				 * Note that we do not COAP_STREAM_STOPPED if no stream with
 				 * that ticket number has been found. This is because the
 				 * CoAP server does not issue another ticket on COAP_REQ_STOP
 				 */
@@ -153,6 +155,12 @@ ze_coap_streaming_thread(void* args) {
 
 				osreq = sm_new_oneshot(sm_req.ticket);
 				LL_APPEND(mngr->sensors[sm_req.sensor].oneshots, osreq);
+
+				onescroll = mngr->sensors[sm_req.sensor].oneshots;
+				while(onescroll!=NULL) {
+					LOGI("SM oneshot register this entry tick%d", (int)onescroll->one.tid);
+					onescroll = onescroll->next;
+				}
 			}
 		}
 		else if (sm_req.rtype == SM_REQ_INVALID) {
@@ -206,15 +214,28 @@ ze_coap_streaming_thread(void* args) {
 					osreq = mngr->sensors[event.type].oneshots;
 					/* Use its ticket to send the sample */
 					put_coap_buf_item(notbuf, COAP_SEND_ASYNCH,
-							osreq->one, COAP_MESSAGE_NON, pyl);
+							osreq->one, COAP_MESSAGE_CON, pyl);
 					/* Let the head point to the next element before freeing the former. */
 					mngr->sensors[event.type].oneshots = osreq->next;
 					free(osreq);
+
+					onescroll = mngr->sensors[event.type].oneshots;
+					while (onescroll != NULL) {
+						LOGI("SM oneshot register this entry tick%d", (int)onescroll->one.tid);
+						onescroll = onescroll->next;
 					}
 
-				/* Do not free pyl because not it
+				}
+
+				/* Do not free pyl because it
 				 * is needed by the notbuf.
 				 */
+
+				/* All oneshots cleared, if there are no streams active
+				 * we're entitled to turn off the sensor.
+				 */
+				if (mngr->sensors[event.type].streams == NULL)
+					android_sensor_turnoff(mngr, event.type);
 			}
 
 			/* Done with the oneshots,
@@ -256,12 +277,26 @@ ze_coap_streaming_thread(void* args) {
 				/* we have cleared all the oneshots
 				 * and there is no stream on that sensor
 				 */
-				android_sensor_turnoff(mngr, event.type);
+				//android_sensor_turnoff(mngr, event.type);
+				/* we might have some stream which was stopped
+				 * and its sensor turned off at that moment,
+				 * but some samples might still be in the queue.
+				 * Since we enter this else on a per-sample basis,
+				 * we might ed up trying to turn off the sensor
+				 * due to samples that were still in the queue when
+				 * the stop stream was performed.
+				 * Although it is useful for turning off the sensor
+				 * that produced a oneshot, in the case the oneshots are
+				 * served and there's no stream active. OK then
+				 * move it at the end, with a lookahead to the streams.
+				 */
 			}
 
 		}
 		queuecount++;
 		}
+
+		//LOGI("SM returning to check for incoming requests");
 
 		queuecount = 0;
 
@@ -274,6 +309,12 @@ ze_coap_streaming_thread(void* args) {
 
 	} /*thread loop end*/
 
+	/*
+	 * TODO: Turn off all sensors that might still be active!
+	 * E.g. asked to quit the server while a stream is in
+	 * process..
+	 */
+
 	LOGI("Streaming Manager out of thread loop, returning..");
 }
 
@@ -281,7 +322,7 @@ ze_coap_streaming_thread(void* args) {
 ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 		coap_ticket_t reg, int freq) {
 
-	LOGI("In the handler");
+	LOGI("SM starting stream");
 	//CHECK_OUT_RANGE(sensor_id);
 
 	ze_stream_t *sub, *newstream;
@@ -300,7 +341,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 		 * the streams should be empty
 		 */
 		if (mngr->sensors[sensor_id].streams != NULL)
-			LOGW("streaming manager inconsistent state");
+			LOGW("SM inconsistent state");
 
 		android_sensor_activate(mngr, sensor_id, freq);
 	}
@@ -317,7 +358,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	 */
 	sub = sm_find_stream(mngr, sensor_id, reg);
 	if (sub != NULL) {
-		LOGI("replacing");
+		LOGI("SM replacing stream");
 		/* TODO
 		 * Do I have to transfer anything to newstream before
 		 * sub gets deleted? Maybe some local status variables.
@@ -337,6 +378,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg) {
 
 	//CHECK_OUT_RANGE(sensor_id);
+	LOGI("SM Stopping stream");
 
 	ze_stream_t *del, *temp;
 
@@ -350,7 +392,7 @@ int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg) {
 		 * because the CoAP server does not issue a new ticket
 		 * when asking for SM_REQ_STOP.
 		 */
-		LOGW("inconsistent state in streaming manager, asked to stop"
+		LOGW("SM inconsistent state in streaming manager, asked to stop"
 				"stream but no streams are active");
 		return SM_ERROR;
 	}
@@ -463,7 +505,7 @@ ze_oneshot_t *sm_find_oneshot(stream_context_t *mngr, int sensor_id, coap_ticket
 
 int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 
-	LOGI("Turning on android sensor%d", sensor);
+	LOGI("SM Turning on android sensor%d", sensor);
 
 	//CHECK_OUT_RANGE(sensor);
 
@@ -476,7 +518,7 @@ int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 		ASensorEventQueue_enableSensor(mngr->sensorEventQueue,
 				mngr->sensors[sensor].android_handle);
 		ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
-				mngr->sensors[sensor].android_handle, freq);
+				mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
 
 		return 0;
 	}
@@ -487,30 +529,30 @@ int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 
 int android_sensor_changef(stream_context_t *mngr, int sensor, int freq) {
 
-	LOGI("Changing frequency to android sensor%d", sensor);
+	LOGI("SM Changing frequency to android sensor%d", sensor);
 
 	//CHECK_OUT_RANGE(sensor);
 
 	if (mngr->sensors[sensor].android_handle == NULL) {
-		LOGW("inconsistent state in sensor manager, asked changef"
+		LOGW("SM inconsistent state in streaming manager, asked changef"
 				"but sensor not initialized in Android");
 		return SM_ERROR;
 	}
 
 	ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
-			mngr->sensors[sensor].android_handle, freq);
+			mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
 	return 0;
 }
 
 
 int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 
-	LOGI("Turning off android sensor%d", sensor);
+	LOGI("SM Turning off android sensor%d", sensor);
 
 	//CHECK_OUT_RANGE(sensor);
 
 	if (mngr->sensors[sensor].android_handle == NULL) {
-		LOGW("inconsistent state in sensor manager, asked turnoff"
+		LOGW("SM inconsistent state in streaming manager, asked turnoff"
 				"but sensor not initialized in Android");
 		return SM_ERROR;
 	}

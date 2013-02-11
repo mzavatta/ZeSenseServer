@@ -76,12 +76,14 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	 * interpret parameters in the request query
 	 * string
 	 */
-	int freq = 20;
+	int freq = 1;
 
 	obopt = coap_check_option(request, COAP_OPTION_SUBSCRIPTION, &opt_iter);
 	if (obopt != NULL) { //There is an observe option
 
 		if (resource->observable == 1) {
+
+			LOGI("Observe option seen and resource observable.");
 
 			/* The returned pointer is either a new pointer or an
 			 * existing one. The reference counter is not incremented
@@ -128,6 +130,9 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 			//coap_registration_release(reg);
 		}
 		else {
+
+			LOGI("Observe option seen but resource unobservable.");
+
 			/* As from draft-coap-observe par4.1 suggestion "unable or unwilling",
 			 * ask one-shot representation to SM.
 			 */
@@ -136,10 +141,17 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 
 			put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, ASENSOR_TYPE_ACCELEROMETER,
 					(coap_ticket_t)(asy->id), 0);
+
+			/*
+			 * Do not unregister since if the resource in not observable
+			 * there can be no streams attached to it.
+			 */
 		}
 	}
 
 	else { //There isn't an observe option
+
+		LOGI("No observe option is seen, simple oneshot request..");
 
 		/* Ask a regular oneshot representation. */
 		asy = coap_register_async(context, peer, request,
@@ -156,6 +168,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 		reg = coap_find_registration(resource, peer);
 		if (reg != NULL)
 			resource->on_unregister(context, reg);
+		else LOGI("No registration found though.");
 	}
 
 	return;
@@ -165,6 +178,10 @@ void
 accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
 	LOGI("Accelerometer on_unregister entered..");
+
+	/* I think this is the best place to invalidate the registration */
+	LOGI("Invalidating");
+	reg->invalid = 1;
 
 	/*
 	 * Unregistration must be done through the streaming manager
@@ -176,6 +193,6 @@ accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 	 * with that ticket (should not happen) it confirms the cancellation anyways.
 	 */
 	put_sm_buf_item(ctx->smreqbuf, SM_REQ_STOP, ASENSOR_TYPE_ACCELEROMETER,
-			(coap_ticket_t)coap_registration_checkout(reg), 0);
+			(coap_ticket_t)/*coap_registration_checkout(*/reg/*)*/, 0);
 
 }

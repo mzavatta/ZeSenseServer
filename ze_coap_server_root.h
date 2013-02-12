@@ -68,7 +68,7 @@ int go;
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz);
 
 int
-ze_coap_server_root(JNIEnv* env, jobject thiz);
+ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager);
 
 coap_context_t *
 get_context(const char *node, const char *port);

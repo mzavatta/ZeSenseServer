@@ -25,7 +25,7 @@ FILE *logfd;
 //jint
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz) {
 int
-ze_coap_server_root(JNIEnv* env, jobject thiz) {
+ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
 
 	LOGI("ZeSense new CoAP server hello, pid%d, tid%d", getpid(), gettid());
 	pthread_setname_np(pthread_self(), "ZeRoot");
@@ -33,12 +33,33 @@ ze_coap_server_root(JNIEnv* env, jobject thiz) {
 
 	//pthread_exit(NULL);
 
+	//ALooper* looper = ALooper_prepare(0);
+
+	jclass ZeGPSManager = (*env)->FindClass(env, "eu/tb/zesense/ZeGPSManager");
+	if (ZeGPSManager==NULL) LOGW("class not found");
+	jmethodID ZeGPSManager_start = (*env)->GetMethodID(env, ZeGPSManager, "startStream", "()I");
+	if (ZeGPSManager_start==NULL) LOGW("method not found");
+	jint s = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_start);
+
+	LOGW("from GPSManager %d", s);
+
+	sleep(10);
+
+	jmethodID ZeGPSManager_stop = (*env)->GetMethodID(env, ZeGPSManager, "stopStream", "()I");
+	if (ZeGPSManager_stop==NULL) LOGW("method not found");
+	jint a = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_stop);
+
+	//exit(1);
+	return 1;
+
+
 	/* Spawn *all* the threads from here, this thread has no other function
 	 * except for instantiating the CoAP, SM contexts and the two buffers
 	 * and passing their references to the threads.
 	 *
 	 * This thread is in some way the lifecycle manager of the system.
 	 */
+
 
 	/* Contexts and buffers; NEVER to reallocate, move or free because
 	 * they are shared among threads! unless we use

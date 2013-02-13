@@ -44,30 +44,43 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 		coap_ticket_t ticket, int conf, ze_payload_t *pyl) {
 
+	int result;
+
+	struct timespec abstimeout;
+
 	LOGI("CoAP buffer PUT invoked");
 
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= COAP_RBUF_SIZE) { //full (greater shall not happen)
-			pthread_cond_wait(&(buf->notfull), &(buf->mtx));
+			clock_gettime(CLOCK_REALTIME, &abstimeout);
+			abstimeout.tv_sec = abstimeout.tv_sec + 2;
+			result = pthread_cond_timedwait(&(buf->notfull), &(buf->mtx), &abstimeout);
 		}
-		buf->rbuf[buf->puthere].rtype = rtype;
-		buf->rbuf[buf->puthere].ticket = ticket;
-		buf->rbuf[buf->puthere].conf = conf;
-		buf->rbuf[buf->puthere].pyl = pyl;
 
-		/*
-		buf->rbuf[buf->puthere].str = str;
-		buf->rbuf[buf->puthere].dest = dest;
-		buf->rbuf[buf->puthere].tknlen = tknlen;
-		buf->rbuf[buf->puthere].tkn = tkn;
-		*/
+		if (result == 0) {
+			buf->rbuf[buf->puthere].rtype = rtype;
+			buf->rbuf[buf->puthere].ticket = ticket;
+			buf->rbuf[buf->puthere].conf = conf;
+			buf->rbuf[buf->puthere].pyl = pyl;
 
-		buf->puthere = ((buf->puthere)+1) % COAP_RBUF_SIZE;
-		buf->counter++;
-		//pthread_cond_signal(buf->notempty); //surely no longer empty
+			/*
+			buf->rbuf[buf->puthere].str = str;
+			buf->rbuf[buf->puthere].dest = dest;
+			buf->rbuf[buf->puthere].tknlen = tknlen;
+			buf->rbuf[buf->puthere].tkn = tkn;
+			*/
+
+			buf->puthere = ((buf->puthere)+1) % COAP_RBUF_SIZE;
+			buf->counter++;
+			//pthread_cond_signal(buf->notempty); //surely no longer empty
+		}
+
 	pthread_mutex_unlock(&(buf->mtx));
 
-	return 0;
+	/* result will be zero in case of successful completion
+	 * or will be ETIMEDOUT if timeout occurs.
+	 */
+	return result;
 }
 
 ze_coap_request_buf_t* init_coap_buf() {

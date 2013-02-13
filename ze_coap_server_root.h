@@ -48,6 +48,8 @@ struct sm_thread_args {
 	stream_context_t *smctx;
 	ze_sm_request_buf_t *smreqbuf;
 	ze_coap_request_buf_t *notbuf;
+	jobject actx;
+	JavaVM *jvm;
 };
 struct coap_thread_args {
 	coap_context_t  *cctx;
@@ -68,7 +70,7 @@ int go;
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz);
 
 int
-ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager);
+ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx);
 
 coap_context_t *
 get_context(const char *node, const char *port);

@@ -25,7 +25,7 @@ FILE *logfd;
 //jint
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz) {
 int
-ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
+ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 
 	LOGI("ZeSense new CoAP server hello, pid%d, tid%d", getpid(), gettid());
 	pthread_setname_np(pthread_self(), "ZeRoot");
@@ -34,36 +34,60 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
 	//pthread_exit(NULL);
 
 	//ALooper* looper = ALooper_prepare(0);
-
+/*
 	jclass ZeGPSManager = (*env)->FindClass(env, "eu/tb/zesense/ZeGPSManager");
 	if (ZeGPSManager==NULL) LOGW("class not found");
+	jmethodID ZeGPSManager_constructor =
+			(*env)->GetMethodID(env, ZeGPSManager, "<init>", "()V");
+	if (ZeGPSManager_constructor==NULL) LOGW("constructor not found");
 	jmethodID ZeGPSManager_start = (*env)->GetMethodID(env, ZeGPSManager, "startStream", "()I");
-	if (ZeGPSManager_start==NULL) LOGW("method not found");
-	jint s = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_start);
+	if (ZeGPSManager_start==NULL) LOGW("startStream not found");
+	jmethodID ZeGPSManager_init = (*env)->GetMethodID(env, ZeGPSManager, "init", "(Landroid/content/Context;)V");
+	if (ZeGPSManager_init==NULL) LOGW("init not found");
+	jmethodID ZeGPSManager_stop = (*env)->GetMethodID(env, ZeGPSManager, "stopStream", "()I");
+	if (ZeGPSManager_stop==NULL) LOGW("stopStream not found");
 
-	LOGW("from GPSManager %d", s);
+	jobject gpsManager = (*env)->NewObject(env, ZeGPSManager, ZeGPSManager_constructor);
+
+	(*env)->CallVoidMethod(env, gpsManager, ZeGPSManager_init, actx);
+	jint sta = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_start);
+	LOGW("from GPSManager %d", sta);
 
 	sleep(10);
 
-	jmethodID ZeGPSManager_stop = (*env)->GetMethodID(env, ZeGPSManager, "stopStream", "()I");
-	if (ZeGPSManager_stop==NULL) LOGW("method not found");
-	jint a = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_stop);
-
+	jint stp = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_stop);
+	LOGW("from GPSManager %d", stp);
+*/
 	//exit(1);
 	return 1;
 
 
 	/* Spawn *all* the threads from here, this thread has no other function
-	 * except for instantiating the CoAP, SM contexts and the two buffers
-	 * and passing their references to the threads.
+	 * except for fixing in memory, once and forever, the handles (what we
+	 * call contexts) of the app components and passing their references
+	 * to the threads.
 	 *
 	 * This thread is in some way the lifecycle manager of the system.
 	 */
 
-
-	/* Contexts and buffers; NEVER to reallocate, move or free because
-	 * they are shared among threads! unless we use
-	 * reference counting */
+	/* App components definitions; NEVER to reallocate, move or free because
+	 * they are shared among threads and their pointers are used from multiple
+	 * subjects!
+	 *
+	 * Components that make up the app:
+	 * - Android system: actx (enables to talk
+	 * to OS services e.g. the singleton LocationManager)
+	 * - CoAP Server: cctx
+	 * - Streaming Manager: smctx
+	 * - Streaming Manager request buffer: smreqbuf
+	 * - CoAP server commands buffer: notbuf
+	 * - JavaVM: jvm
+	 *
+	 * Remark on the JavaVM: it can be located only from this thread
+	 * using the JNIEnv. JNIEnv is not valid across threads, but the
+	 * JavaVM is and is able to produce a JNIEnv for a thread only
+	 * from within the thread.
+	 * */
 	coap_context_t  *cctx = NULL;
 	cctx = get_context(SERVER_IP, SERVER_PORT);
 	if (cctx == NULL)
@@ -88,8 +112,9 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
 		return -1;
 	LOGI("Root, got notbuf");
 
-	cctx->notbuf = notbuf;
-	cctx->smreqbuf = smreqbuf;
+	JavaVM *jvm;
+	int jvmres = GetJavaVM(env, &jvm);
+	if (jvmres != 0) LOGW("Cannot get JavaVM");
 
     /* Open log file. */
 	char *logpath = ZELOGPATH;
@@ -108,19 +133,11 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
 	/*
 	 * In a two-thread scenario:
 	 * - CoAP server needs *cctx, *smreqbu, *notbuf
-	 * - Streaming Manager needs *smctx, *smreqbuf, *notbuf
+	 * - Streaming Manager needs *smctx, *smreqbuf, *notbuf, actx, jvm
 	 *
-	 * Since most of the already made library function calls take
-	 * coap_context_t and are unaware of our buffers,
-	 * let's put references to our buffers inside coap_context_t
-	 * so there's no need to change library function signatures.
-	 * (for example, the GET POST etc.. handlers have a signature
-	 * coap_context_t  *, struct coap_resource_t *, coap_address_t *,
-	 * coap_pdu_t *, str *, coap_pdu_t *
-	 * but they do need the SM buffer!)
-	 *
-	 * The Streaming Manager is tailored for the use of the buffers
-	 * so we can give the references in a separate way.
+	 * The objective of this umbrella is to gather the app components
+	 * to pass them to the threads. They will fill up their own details
+	 * contexts when created.
 	 */
 	globalexit = 0;
 
@@ -131,6 +148,8 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
 	smargs.smctx = smctx;
 	smargs.smreqbuf = smreqbuf;
 	smargs.notbuf = notbuf;
+	smargs.actx = actx;
+	smargs.jvm = jvm;
 
 	pthread_t coap_server_thread;
 	struct coap_thread_args coapargs;
@@ -188,8 +207,6 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject gpsManager) {
 
 	return 1;
 }
-
-
 
 /* Interprets IP/port on which opens and binds a socket. */
 coap_context_t *

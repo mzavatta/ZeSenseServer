@@ -137,8 +137,13 @@ typedef struct stream_context_t {
 
 	/* Android sensor infrastructure */
 	ASensorManager* sensorManager;
+
 	ASensorEventQueue* sensorEventQueue;
 	ALooper* looper;
+
+	JNIEnv* env;
+	jclass ZeGPSManager; //the Java class object
+	jobject gpsManager; //an instance of ZeGPSManager
 } stream_context_t;
 
 /*
@@ -149,6 +154,13 @@ if (sensor<0 || sensor>=ZE_NUMSENSORS) {
 }	return 0; }
 */
 
+/*
+ *
+ */
+typedef struct sm_req_internal_t {
+	struct sm_req_internal_t *next;
+	ze_sm_request_t req;
+} sm_req_internal_t;
 
 void *
 ze_coap_streaming_thread(void* args);

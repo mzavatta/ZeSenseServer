@@ -31,9 +31,17 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 	temp->sensorManager = NULL;
 	temp->sensorEventQueue = NULL;
 	temp->looper = NULL;
+	temp->gpsManager = NULL;
 
 	return temp;
 }
+
+/* Some forward declarations for functions that are not really interface
+ * and therefore not suitable in the header file. */
+int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
+		coap_ticket_t ticket, int conf, ze_payload_t *pyl,
+		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
+ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 
 
 void *
@@ -43,15 +51,21 @@ ze_coap_streaming_thread(void* args) {
 	//pthread_exit(NULL);
 
 	struct sm_thread_args* ar = ((struct sm_thread_args*)(args));
-
 	stream_context_t *mngr = ar->smctx;
 	ze_sm_request_buf_t *smreqbuf = ar->smreqbuf;
 	ze_coap_request_buf_t *notbuf = ar->notbuf;
+	JavaVM *jvm = ar->jvm;
+	jobject actx = ar->actx;
 
 	// Hello and current time and date
 	LOGI("Hello from Streaming Manager Thread pid%d, tid%d!", getpid(), gettid());
 	time_t lt;
 	lt = time(NULL);
+
+	// Attach thread to Dalvik
+	AttachCurrentThead(jvm, &(mngr->env), NULL);
+
+	/*-------------- Prepare missing components in the mngr context --------------*/
 
     // Prepare looper
     mngr->looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
@@ -60,11 +74,44 @@ ze_coap_streaming_thread(void* args) {
     // Take the SensorManager (C++ singleton class)
     mngr->sensorManager = ASensorManager_getInstance();
     LOGI("SM, got sensorManager");
-
     // Create event queue associated with that looper //XXX !!! wtf is 45 ??
     mngr->sensorEventQueue =
     		ASensorManager_createEventQueue(mngr->sensorManager, mngr->looper, 45, NULL, NULL);
     LOGI("SM, got sensorEventQueue");
+
+    // Take the ZeGPSManager class and create its instance and event queue
+    mngr->ZeGPSManager = (*mngr->env)->FindClass(mngr->env, "eu/tb/zesense/ZeGPSManager");
+    if ( !mngr->ZeGPSManager ) LOGW("ZeGPSManager class not found");
+
+    jmethodID ZeGPSManager_constructor =
+    		(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "<init>", "()V");
+	if ( !ZeGPSManager_constructor ) LOGW("ZeGPSManager constructor not found");
+
+    mngr->gpsManager = 	(*mngr->env)->NewObject(mngr->env, mngr->ZeGPSManager, ZeGPSManager_constructor);
+    if ( !mngr->gpsManager ) LOGW("ZeGPSManager instance cannot be constructed");
+
+	jmethodID ZeGPSManager_init =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "init", "(Landroid/content/Context;)V");
+	if ( !ZeGPSManager_init ) LOGW("ZeGPSManager's init() not found");
+
+	(*mngr->env)->CallVoidMethod(mngr->env, mngr->gpsManager, ZeGPSManager_init, actx);
+
+/*
+	jmethodID ZeGPSManager_destroy =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "destroy", "()V");
+	if ( !ZeGPSManager_destroy ) LOGW("ZeGPSManager's destroy() not found");
+
+	jmethodID ZeGPSManager_start =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "startStream", "()I");
+	if ( !ZeGPSManager_start ) LOGW("ZeGPSManager's startStream() not found");
+
+	jmethodID ZeGPSManager_stop =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "stopStream", "()I");
+	if ( !ZeGPSManager_stop ) LOGW("ZeGPSManager's stopStream() not found");
+*/
+
+
+
 
 	ASensorEvent event;
 
@@ -85,8 +132,8 @@ ze_coap_streaming_thread(void* args) {
 	 */
 	int queuecount = 0;
 
-	//put_sm_buf_item(smreqbuf, SM_REQ_START, ASENSOR_TYPE_ACCELEROMETER,
-	//		(coap_ticket_t)(2), 20);
+	/* Internal miniqueue anti deadlocks. */
+	sm_req_internal_t *adqueue = NULL;
 
 	while(!globalexit) { /*thread loop start*/
 
@@ -94,7 +141,7 @@ ze_coap_streaming_thread(void* args) {
 
 		/* Fetch one request from the buffer, if any.
 		 * get_rq_buf_item does not block */
-		sm_req = get_sm_buf_item(smreqbuf);
+		sm_req = get_sm_helper(smreqbuf, adqueue);
 
 		if (sm_req.rtype == SM_REQ_START) {
 			LOGI("SM we got a START STREAM request");
@@ -103,15 +150,15 @@ ze_coap_streaming_thread(void* args) {
 			 * we're not able to start one.
 			 * Ok let's make it return NULL in both cases.. */
 			if ( sm_start_stream(mngr, sm_req.sensor, sm_req.ticket, sm_req.freq) == NULL)
-				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
-						ZE_PARAM_UNDEFINED, NULL);
+				put_coap_helper(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
+						ZE_PARAM_UNDEFINED, NULL, smreqbuf, adqueue);
 		}
 		else if (sm_req.rtype == SM_REQ_STOP) {
 			LOGI("SM we got a STOP STREAM request");
 			/* Note that sm_stop_stream frees the memory of the stream it deletes. */
 			if ( sm_stop_stream(mngr, sm_req.sensor, sm_req.ticket) != SM_ERROR )
-				put_coap_buf_item(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
-						ZE_PARAM_UNDEFINED, NULL);
+				put_coap_helper(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
+						ZE_PARAM_UNDEFINED, NULL, smreqbuf, adqueue);
 				/*
 				 * Note that we do not COAP_STREAM_STOPPED if no stream with
 				 * that ticket number has been found. This is because the
@@ -142,8 +189,8 @@ ze_coap_streaming_thread(void* args) {
 				 * attaching the payload. Do not free pyl because not it
 				 * is needed by the notbuf.
 				 */
-				put_coap_buf_item(notbuf, COAP_SEND_ASYNCH, sm_req.ticket,
-						COAP_MESSAGE_NON, pyl);
+				put_coap_helper(notbuf, COAP_SEND_ASYNCH, sm_req.ticket,
+						COAP_MESSAGE_NON, pyl, smreqbuf, adqueue);
 			}
 			else {
 				/* Sensor is not active, cache may be old.
@@ -213,8 +260,8 @@ ze_coap_streaming_thread(void* args) {
 					/* Take first element. */
 					osreq = mngr->sensors[event.type].oneshots;
 					/* Use its ticket to send the sample */
-					put_coap_buf_item(notbuf, COAP_SEND_ASYNCH,
-							osreq->one, COAP_MESSAGE_CON, pyl);
+					put_coap_helper(notbuf, COAP_SEND_ASYNCH,
+							osreq->one, COAP_MESSAGE_CON, pyl, smreqbuf, adqueue);
 					/* Let the head point to the next element before freeing the former. */
 					mngr->sensors[event.type].oneshots = osreq->next;
 					free(osreq);
@@ -259,8 +306,8 @@ ze_coap_streaming_thread(void* args) {
 				 * wait but like this*/
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
-					put_coap_buf_item(notbuf, COAP_SEND_NOTIF,
-							stream->reg, COAP_MESSAGE_NON, pyl);
+					put_coap_helper(notbuf, COAP_SEND_NOTIF,
+							stream->reg, COAP_MESSAGE_NON, pyl, smreqbuf, adqueue);
 					/*
 					 * we'll likely need to do some operations here,
 					 * like increment the sequence number
@@ -317,6 +364,70 @@ ze_coap_streaming_thread(void* args) {
 
 	LOGI("Streaming Manager out of thread loop, returning..");
 }
+
+/*------------------ Anti-deadlock queue wrappers -----------------------------------*/
+
+int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
+		coap_ticket_t ticket, int conf, ze_payload_t *pyl,
+		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
+
+	int result;
+	sm_req_internal_t *temp = NULL;
+
+	/* Try to put in the buffer. If timeout on full condition,
+	 * fetch a request from the sm buffer and internally queue it.
+	 * Items are appended, so since it must be a FIFO queue,
+	 * we'll fetch from list head.
+	 * Loop until the original put succeeds.
+	 */
+	result = put_coap_buf_item(notbuf, rtype, ticket, conf, pyl);
+	while (result == ETIMEDOUT) {
+
+		/* Take some memory for the queue element and copy.
+		 * Yes in this way I'm adding one element to the queue
+		 * even though the queue is empty, that's a possible
+		 * optimization. It's not a problem as the checks on the
+		 * validity of the request are made by the caller.
+		 * Also, it should not happen frequently to have a timeout
+		 * in the coap put and not having the sm queue full..
+		 * (although it could happen when the coap thread blocks
+		 * for a long time but not on the full condition, but
+		 * there's no other real place where the coap thread would
+		 * block for a long time)
+		 */
+		temp = malloc(sizeof(sm_req_internal_t));
+		if (temp == NULL) return -1;
+		temp->req = get_sm_buf_item(smreqbuf);
+		LL_APPEND(adqueue, temp);
+
+		result = put_coap_buf_item(notbuf, rtype, ticket, conf, pyl);
+	}
+	return 1;
+}
+
+/* It frees the memory, do not need to free anything outside!! */
+ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
+
+	sm_req_internal_t *temp = NULL;
+	ze_sm_request_t ret;
+
+	/* If there is anything in the internal queue, return it.
+	 * Fetch from list head since it has to be FIFO and items
+	 * get appended during insertion.
+	 * Otherwise, consume some of the real queue.
+	 */
+	if (adqueue != NULL) {
+		temp = adqueue; //save pointer
+		adqueue = temp->next; //unplug
+		ret = temp->req; //save value
+		free(temp); //free
+		return ret;
+	}
+	/* Otherwise very normal get... */
+	return get_sm_buf_item(smreqbuf);
+}
+
+
 
 /*-------------------- Stream helpers -----------------------------------------------*/
 ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,

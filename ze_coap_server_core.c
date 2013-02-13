@@ -27,6 +27,22 @@ ze_coap_server_core_thread(void *args) {
 	ze_sm_request_buf_t *smreqbuf = ar->smreqbuf;
 	ze_coap_request_buf_t *notbuf = ar->notbuf;
 
+	/* Not elegant but handy:
+	 * Since most of the already made library function calls take
+	 * coap_context_t and are unaware of our buffers,
+	 * let's put references to our buffers inside coap_context_t
+	 * so there's no need to change library function signatures.
+	 * (for example, the GET POST etc.. handlers have a signature
+	 * coap_context_t  *, struct coap_resource_t *, coap_address_t *,
+	 * coap_pdu_t *, str *, coap_pdu_t *
+	 * but they do need the SM buffer!)
+	 *
+	 * The Streaming Manager is tailored for the use of the buffers
+	 * so we can give the references in a separate way.
+	 */
+	cctx->notbuf = notbuf;
+	cctx->smreqbuf = smreqbuf;
+
 	/* Switch on, off. */
 	//pthread_exit(NULL);
 

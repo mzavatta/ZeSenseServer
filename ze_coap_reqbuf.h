@@ -14,6 +14,7 @@
 #define ZE_COAP_REQBUF_H
 
 #include <pthread.h>
+#include <errno.h>
 #include "ze_payload.h"
 #include "asynchronous.h"
 

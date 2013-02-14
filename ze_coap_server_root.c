@@ -30,37 +30,9 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	LOGI("ZeSense new CoAP server hello, pid%d, tid%d", getpid(), gettid());
 	pthread_setname_np(pthread_self(), "ZeRoot");
 
-
 	//pthread_exit(NULL);
-
-	//ALooper* looper = ALooper_prepare(0);
-/*
-	jclass ZeGPSManager = (*env)->FindClass(env, "eu/tb/zesense/ZeGPSManager");
-	if (ZeGPSManager==NULL) LOGW("class not found");
-	jmethodID ZeGPSManager_constructor =
-			(*env)->GetMethodID(env, ZeGPSManager, "<init>", "()V");
-	if (ZeGPSManager_constructor==NULL) LOGW("constructor not found");
-	jmethodID ZeGPSManager_start = (*env)->GetMethodID(env, ZeGPSManager, "startStream", "()I");
-	if (ZeGPSManager_start==NULL) LOGW("startStream not found");
-	jmethodID ZeGPSManager_init = (*env)->GetMethodID(env, ZeGPSManager, "init", "(Landroid/content/Context;)V");
-	if (ZeGPSManager_init==NULL) LOGW("init not found");
-	jmethodID ZeGPSManager_stop = (*env)->GetMethodID(env, ZeGPSManager, "stopStream", "()I");
-	if (ZeGPSManager_stop==NULL) LOGW("stopStream not found");
-
-	jobject gpsManager = (*env)->NewObject(env, ZeGPSManager, ZeGPSManager_constructor);
-
-	(*env)->CallVoidMethod(env, gpsManager, ZeGPSManager_init, actx);
-	jint sta = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_start);
-	LOGW("from GPSManager %d", sta);
-
-	sleep(10);
-
-	jint stp = (*env)->CallIntMethod(env, gpsManager, ZeGPSManager_stop);
-	LOGW("from GPSManager %d", stp);
-*/
 	//exit(1);
-	return 1;
-
+	//return 1;
 
 	/* Spawn *all* the threads from here, this thread has no other function
 	 * except for fixing in memory, once and forever, the handles (what we
@@ -113,8 +85,35 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	LOGI("Root, got notbuf");
 
 	JavaVM *jvm;
-	int jvmres = GetJavaVM(env, &jvm);
+	int jvmres = (*env)->GetJavaVM(env, &jvm);
 	if (jvmres != 0) LOGW("Cannot get JavaVM");
+
+    /* From Android docs:
+     * You can get into trouble if you create a thread yourself
+     * (perhaps by calling pthread_create and then attaching it
+     * with AttachCurrentThread).
+     * If you call FindClass from this thread, the JavaVM will
+     * start in the "system" class loader instead of the one
+     * associated with your application, so attempts to find
+     * app-specific classes will fail.
+     *
+     * I could pass the ZeGPSManager class to this pthread from
+     * the root thread which indeed uses the app class loader.
+     * Remember the local and global reference mechanisms from
+     * Oracle's JNI reference manual:
+     * "Local references are only valid in the thread in which
+     * they are created. The native code must not pass local
+     * references from one thread to another."
+     * Also, in jni.h there is typedef jobject jclass;
+     * So if I pass the class object to the pthread from root
+     * I probably should create a global reference for it
+     * and explicitly free it before exiting the root. */
+    jclass ZeGPSManagerL = (*env)->FindClass(env, "eu/tb/zesense/ZeGPSManager");
+    if ( !ZeGPSManagerL ) LOGW("ZeGPSManager class not found");
+    jclass ZeGPSManager = (*env)->NewGlobalRef(env, ZeGPSManagerL);
+    if ( !ZeGPSManager ) LOGW("Cannot create global ref for GPSManager");
+    jobject actxg = (*env)->NewGlobalRef(env, actx);
+    if ( !ZeGPSManager ) LOGW("Cannot create global ref for actx");
 
     /* Open log file. */
 	char *logpath = ZELOGPATH;
@@ -148,8 +147,9 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	smargs.smctx = smctx;
 	smargs.smreqbuf = smreqbuf;
 	smargs.notbuf = notbuf;
-	smargs.actx = actx;
+	smargs.actx = actxg;
 	smargs.jvm = jvm;
+	smargs.ZeGPSManager = ZeGPSManager;
 
 	pthread_t coap_server_thread;
 	struct coap_thread_args coapargs;
@@ -199,7 +199,12 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	pthread_join(streaming_manager_thread, &exitcode);
 	pthread_join(coap_server_thread, &exitcode);
 
-	/* Free the four app components. */
+	/* Free global ZeGPSManager reference.
+	 * We do it here as it's us that created it! */
+	(*env)->DeleteGlobalRef(env, ZeGPSManager);
+	(*env)->DeleteGlobalRef(env, actxg);
+
+	/* Free the four app components that we allocated. */
 	free(cctx);
 	free(smctx);
 	free(smreqbuf);

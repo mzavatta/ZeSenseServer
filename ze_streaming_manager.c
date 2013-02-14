@@ -63,9 +63,13 @@ ze_coap_streaming_thread(void* args) {
 	lt = time(NULL);
 
 	// Attach thread to Dalvik
-	AttachCurrentThead(jvm, &(mngr->env), NULL);
+	jint attached = (*jvm)->AttachCurrentThread(jvm, &(mngr->env), NULL);
+	if ( attached!=0 ) LOGW("SM cannot attach thread");
 
-	/*-------------- Prepare missing components in the mngr context --------------*/
+	// Register in context the ZeGPSManager class
+	mngr->ZeGPSManager = ar->ZeGPSManager;
+
+	/*-------------------------- Prepare the mngr context -----------------------*/
 
     // Prepare looper
     mngr->looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
@@ -79,41 +83,45 @@ ze_coap_streaming_thread(void* args) {
     		ASensorManager_createEventQueue(mngr->sensorManager, mngr->looper, 45, NULL, NULL);
     LOGI("SM, got sensorEventQueue");
 
-    // Take the ZeGPSManager class and create its instance and event queue
-    mngr->ZeGPSManager = (*mngr->env)->FindClass(mngr->env, "eu/tb/zesense/ZeGPSManager");
-    if ( !mngr->ZeGPSManager ) LOGW("ZeGPSManager class not found");
-
+    // Create ZeGPSManager instance and initialize it
     jmethodID ZeGPSManager_constructor =
     		(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "<init>", "()V");
 	if ( !ZeGPSManager_constructor ) LOGW("ZeGPSManager constructor not found");
 
-    mngr->gpsManager = 	(*mngr->env)->NewObject(mngr->env, mngr->ZeGPSManager, ZeGPSManager_constructor);
-    if ( !mngr->gpsManager ) LOGW("ZeGPSManager instance cannot be constructed");
+	LOGW("Got constructor");
+
+    mngr->gpsManager = (*mngr->env)->NewObject(mngr->env, mngr->ZeGPSManager, ZeGPSManager_constructor);
+    if ( !mngr->gpsManager) LOGW("ZeGPSManager instance cannot be constructed");
+
+    LOGW("Object constructed");
 
 	jmethodID ZeGPSManager_init =
 			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "init", "(Landroid/content/Context;)V");
 	if ( !ZeGPSManager_init ) LOGW("ZeGPSManager's init() not found");
 
+	LOGW("Got method id");
+
 	(*mngr->env)->CallVoidMethod(mngr->env, mngr->gpsManager, ZeGPSManager_init, actx);
 
-/*
+	LOGW("Called init()");
+
+	/*
 	jmethodID ZeGPSManager_destroy =
 			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "destroy", "()V");
 	if ( !ZeGPSManager_destroy ) LOGW("ZeGPSManager's destroy() not found");
+	 */
 
 	jmethodID ZeGPSManager_start =
 			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "startStream", "()I");
 	if ( !ZeGPSManager_start ) LOGW("ZeGPSManager's startStream() not found");
 
-	jmethodID ZeGPSManager_stop =
-			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "stopStream", "()I");
-	if ( !ZeGPSManager_stop ) LOGW("ZeGPSManager's stopStream() not found");
-*/
-
+	jint sta = (*mngr->env)->CallIntMethod(mngr->env, mngr->gpsManager, ZeGPSManager_start);
+	LOGW("from GPSManager %d", sta);
 
 
 
 	ASensorEvent event;
+	jobject location;
 
 	ze_payload_t *pyl = NULL;
 
@@ -127,12 +135,31 @@ ze_coap_streaming_thread(void* args) {
 
 	ze_oneshot_t *onescroll = NULL;
 
+	jmethodID ZeGPSManager_getSample =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "getSample", "()Landroid/location/Location;");
+	if ( !ZeGPSManager_getSample ) LOGW("ZeGPSManager's getSample() not found");
+
+	jclass Location = (*mngr->env)->FindClass(mngr->env, "android/location/Location");
+	if ( !Location ) LOGW("Class Location not found");
+
+	//double getLatitude()
+	jmethodID Location_getLatitude =
+			(*mngr->env)->GetMethodID(mngr->env, Location, "getLatitude", "()D");
+	if ( !Location_getLatitude ) LOGW("Method getLatitude not found");
+
+	//long getTime()
+	jmethodID Location_getTime =
+			(*mngr->env)->GetMethodID(mngr->env, Location, "getTime", "()J");
+	if ( !Location_getTime ) LOGW("Method getTime not found");
+
+
+
 	/* To control the time spent on streaming
 	 * wrt the time spent on serving requests
 	 */
 	int queuecount = 0;
 
-	/* Internal miniqueue anti deadlocks. */
+	/* Internal anti-deadlock miniqueue. */
 	sm_req_internal_t *adqueue = NULL;
 
 	while(!globalexit) { /*thread loop start*/
@@ -343,9 +370,24 @@ ze_coap_streaming_thread(void* args) {
 		queuecount++;
 		}
 
-		//LOGI("SM returning to check for incoming requests");
-
 		queuecount = 0;
+
+
+		/*------- Now GPS, if any... */
+
+		//double getLatitude()
+
+		location = (*mngr->env)->
+				CallObjectMethod(mngr->env, mngr->gpsManager, ZeGPSManager_getSample);
+		if ( location ) { //Queue not empty, it'd be NULL otherwise
+
+			jdouble loc_lat = (*mngr->env)->
+					CallDoubleMethod(mngr->env, location, Location_getLatitude);
+			jlong loc_time = (*mngr->env)->
+					CallLongMethod(mngr->env, location, Location_getTime);
+
+			LOGI("Location in native lat%f time%lld", loc_lat, loc_time);
+		}
 
 		/*----------------------Sleep for a while, not much actually-------------------*/
 
@@ -356,11 +398,21 @@ ze_coap_streaming_thread(void* args) {
 
 	} /*thread loop end*/
 
+
+	jmethodID ZeGPSManager_stop =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "stopStream", "()I");
+	if ( !ZeGPSManager_stop ) LOGW("ZeGPSManager's stopStream() not found");
+	jint sto = (*mngr->env)->CallIntMethod(mngr->env, mngr->gpsManager, ZeGPSManager_stop);
+	LOGW("from GPSManager %d", sto);
+
 	/*
 	 * TODO: Turn off all sensors that might still be active!
 	 * E.g. asked to quit the server while a stream is in
 	 * process..
 	 */
+
+	/* Detach this thread from JVM. */
+	(*jvm)->DetachCurrentThread(jvm);
 
 	LOGI("Streaming Manager out of thread loop, returning..");
 }
@@ -382,7 +434,7 @@ int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
 	 */
 	result = put_coap_buf_item(notbuf, rtype, ticket, conf, pyl);
 	while (result == ETIMEDOUT) {
-
+		LOGW("Deadlock resolution mechanism kicked in!");
 		/* Take some memory for the queue element and copy.
 		 * Yes in this way I'm adding one element to the queue
 		 * even though the queue is empty, that's a possible
@@ -397,6 +449,7 @@ int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
 		 */
 		temp = malloc(sizeof(sm_req_internal_t));
 		if (temp == NULL) return -1;
+		temp->next = NULL;
 		temp->req = get_sm_buf_item(smreqbuf);
 		LL_APPEND(adqueue, temp);
 
@@ -417,6 +470,7 @@ ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *
 	 * Otherwise, consume some of the real queue.
 	 */
 	if (adqueue != NULL) {
+		LOGW("Miniqueue not empty, picking a deferred request..");
 		temp = adqueue; //save pointer
 		adqueue = temp->next; //unplug
 		ret = temp->req; //save value

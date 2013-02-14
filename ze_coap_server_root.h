@@ -43,13 +43,14 @@
 //#define SERVER_IP "10.0.2.15" 	//Android emulator interface
 #define SERVER_PORT "5683"
 
-/* Stuctures to wrap parameters for threads.*/
+/* Structures to wrap parameters for threads.*/
 struct sm_thread_args {
 	stream_context_t *smctx;
 	ze_sm_request_buf_t *smreqbuf;
 	ze_coap_request_buf_t *notbuf;
 	jobject actx;
 	JavaVM *jvm;
+	jclass ZeGPSManager;
 };
 struct coap_thread_args {
 	coap_context_t  *cctx;

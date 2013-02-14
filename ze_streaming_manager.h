@@ -12,6 +12,7 @@
 #define ZE_STREAMING_MANAGER_H
 
 #include <android/sensor.h>
+#include <jni.h>
 //#include "coap.h"
 
 #include "pdu.h"
@@ -21,6 +22,37 @@
 #include "ze_coap_reqbuf.h"
 #include "ze_sm_reqbuf.h"
 #include "ze_log.h"
+
+/*
+ * <source>/hardware/libhardware/include/hardware/sensors.h
+#define SENSOR_TYPE_ACCELEROMETER       1
+#define SENSOR_TYPE_MAGNETIC_FIELD      2
+#define SENSOR_TYPE_ORIENTATION         3
+#define SENSOR_TYPE_GYROSCOPE           4
+#define SENSOR_TYPE_LIGHT               5
+#define SENSOR_TYPE_PRESSURE            6
+#define SENSOR_TYPE_TEMPERATURE         7   // deprecated
+#define SENSOR_TYPE_PROXIMITY           8
+#define SENSOR_TYPE_GRAVITY             9
+#define SENSOR_TYPE_LINEAR_ACCELERATION 10
+#define SENSOR_TYPE_ROTATION_VECTOR     11
+#define SENSOR_TYPE_RELATIVE_HUMIDITY   12
+#define SENSOR_TYPE_AMBIENT_TEMPERATURE 13
+
+ * NDK mirrors in synch with above
+enum {
+    ASENSOR_TYPE_ACCELEROMETER      = 1,
+    ASENSOR_TYPE_MAGNETIC_FIELD     = 2,
+    ASENSOR_TYPE_GYROSCOPE          = 4,
+    ASENSOR_TYPE_LIGHT              = 5,
+    ASENSOR_TYPE_PROXIMITY          = 8
+};
+ */
+
+// Definitions for missing NDK sensor types, as we include only the NDK interface
+#define ZESENSE_SENSOR_TYPE_ORIENTATION		3
+#define ZESENSE_SENSOR_TYPE_PRESSURE		6
+#define ZESENSE_SENSOR_TYPE_LOCATION		14
 
 
 /* Error conditions */
@@ -53,7 +85,8 @@
 #define QUEUE_REQ_RATIO		5
 
 /* Other settings, to be moved */
-#define ZE_NUMSENSORS		13+1 //+1 is for array declarations
+#define ZE_NUMSENSORS		(14+1) /* +1 in order to use sensor types
+									* as array indexes */
 
 /* Utilities */
 #define TRUE 	0

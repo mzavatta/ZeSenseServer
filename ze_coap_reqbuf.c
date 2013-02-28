@@ -41,10 +41,41 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 	return temp;
 }
 
-int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
-		coap_ticket_t ticket, int conf, ze_payload_t *pyl) {
+/*
+int get_rtp_buf_item(JNIEnv* env, jobject thiz, jobject command) {
 
-	int result;
+	ze_coap_request_t temp;
+
+	pthread_mutex_lock(&(notbufg->mtx));
+		if (notbufg->counter <= 0) { //empty (shall never < 0 anyway)
+
+			 // pthread_cond_wait(buf->notempty, buf->mtx);
+			 // do nothing, we must not block!
+
+			// Signal that the buffer is empty by returning
+			 //* an invalid request
+			temp.rtype = COAP_SMREQ_INVALID;
+		}
+		else {
+			temp = notbufg->rbuf[notbufg->gethere];
+			//temp.reg = coap_registration_checkout(temp.reg);
+			notbufg->gethere = ((notbufg->gethere)+1) % COAP_RBUF_SIZE;
+			notbufg->counter--;
+			pthread_cond_signal(&(notbufg->notfull)); //surely no longer full
+		}
+	pthread_mutex_unlock(&(notbufg->mtx));
+
+
+	// Now transfer the data in the jobect command given,
+	// * sort of command.type == temp.rtype
+}*/
+
+int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
+		coap_ticket_t ticket, int conf, /*ze_payload_t *pyl*/unsigned char *pk) {
+
+	int timeout = 0;
+
+	int foundfull = 0;
 
 	struct timespec abstimeout;
 
@@ -52,16 +83,19 @@ int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= COAP_RBUF_SIZE) { //full (greater shall not happen)
+			foundfull = 1;
 			clock_gettime(CLOCK_REALTIME, &abstimeout);
 			abstimeout.tv_sec = abstimeout.tv_sec + 2;
-			result = pthread_cond_timedwait(&(buf->notfull), &(buf->mtx), &abstimeout);
+			timeout = pthread_cond_timedwait(&(buf->notfull), &(buf->mtx), &abstimeout);
 		}
 
-		if (result == 0) {
+		if ( !foundfull ||
+				(foundfull && timeout == 0) ) {
 			buf->rbuf[buf->puthere].rtype = rtype;
 			buf->rbuf[buf->puthere].ticket = ticket;
 			buf->rbuf[buf->puthere].conf = conf;
-			buf->rbuf[buf->puthere].pyl = pyl;
+			//buf->rbuf[buf->puthere].pyl = pyl;
+			buf->rbuf[buf->puthere].pk = pk;
 
 			/*
 			buf->rbuf[buf->puthere].str = str;
@@ -80,7 +114,7 @@ int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 	/* result will be zero in case of successful completion
 	 * or will be ETIMEDOUT if timeout occurs.
 	 */
-	return result;
+	return timeout;
 }
 
 ze_coap_request_buf_t* init_coap_buf() {

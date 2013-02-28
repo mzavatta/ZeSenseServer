@@ -67,6 +67,13 @@ int globalexit;
 /* Only for testing purposes. */
 int go;
 
+/* Globals holding the buffer
+ * Only for testing the JNI of RTP and
+ * our Streaming Manager interaction through JNI
+ */
+ze_sm_request_buf_t *smreqbufg;
+ze_coap_request_buf_t *notbufg;
+
 //jint
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz);
 

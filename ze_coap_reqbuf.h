@@ -15,7 +15,7 @@
 
 #include <pthread.h>
 #include <errno.h>
-#include "ze_payload.h"
+#include "ze_coap_payload.h"
 #include "asynchronous.h"
 
 /* Buffer size */
@@ -27,27 +27,18 @@ struct ze_coap_request_buf_t;
 struct ze_coap_request_t;
 
 typedef struct ze_coap_request_t {
-	/* Request type */
-	int rtype;
 
-	/* Ticket corresponding to the underlying registration */
-	coap_ticket_t ticket;
+	/* Request header. */
+	int rtype;				//Request type
+	coap_ticket_t ticket; 	//Request ticket
+	int conf;				//Reliability desired (CON or NON)
 
-	/* CON or NON */
-	int conf;
+	/* Request payload, opaque type.
+	 * The receiver is assumed to know the payload structure
+	 * he is receiving. The buffer is just a medium. */
+	unsigned char *pk;
+	//ze_payload_t *pyl;
 
-	ze_payload_t *pyl;
-	/* this could be turned into
-	 * unsigned char *pyl;
-	 * int pyllength;
-	 * keeping the ze_payload_t type to be comfortable
-	 * for sizeof(.)
-	 * otherwise the server has to convert the structure
-	 * into an undistinguished unsigned char*  thus
-	 * needing to copy it
-	 * plus we save a free, because in pyl there is another
-	 * pointer, pyl->data with heap memory attached to it
-	 */
 } ze_coap_request_t;
 
 typedef struct ze_coap_request_buf_t {
@@ -101,7 +92,7 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf);
  * @return Zero on success
  */
 int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
-		coap_ticket_t reg, int conf, ze_payload_t *pyl);
+		coap_ticket_t reg, int conf, /*ze_payload_t *pyl*/unsigned char *pk);
 
 
 ze_coap_request_buf_t* init_coap_buf();

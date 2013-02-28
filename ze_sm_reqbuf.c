@@ -78,6 +78,7 @@ int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 	return 0;
 }
 
+
 ze_sm_request_buf_t* init_sm_buf() {
 
 	ze_sm_request_buf_t *buf = malloc(sizeof(ze_sm_request_buf_t));

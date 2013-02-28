@@ -42,6 +42,30 @@ void
 accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
 /*-------------------------------------------------------------------------*/
 
+/*--------- Location --------------------------------------------------*/
+coap_resource_t *
+ze_coap_init_location();
+
+void
+location_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response);
+
+void
+location_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
+/*-------------------------------------------------------------------------*/
+
+/*--------- Generics --------------------------------------------------*/
+void
+generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response,
+	      int sensor);
+
+void
+generic_on_unregister(coap_context_t *ctx, coap_registration_t *reg,
+		  int sensor);
+/*-------------------------------------------------------------------------*/
 
 
 #endif

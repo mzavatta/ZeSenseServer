@@ -27,10 +27,14 @@ ze_coap_init_resources(coap_context_t *context) {
 	coap_add_resource(context, r);
 	r = NULL;
 
+	r = ze_coap_init_location();
+	coap_add_resource(context, r);
+	r = NULL;
+
 	/* Other resources to follow... */
 }
 
-
+/*------------------------------ Accelerometer -------------------------------------------*/
 coap_resource_t *
 ze_coap_init_accel() {
 
@@ -58,11 +62,73 @@ ze_coap_init_accel() {
 	return r;
 }
 
-
 void
-accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
+accel_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response) {
+
+	generic_GET_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_ACCELEROMETER);
+
+}
+
+void
+accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+
+	generic_on_unregister(ctx, reg, ASENSOR_TYPE_ACCELEROMETER);
+}
+
+/*-------------------------------- Location ---------------------------------------------*/
+
+coap_resource_t *
+ze_coap_init_location() {
+
+	LOGI("Initializing location..");
+
+	coap_resource_t *r;
+
+	r = coap_resource_init((unsigned char *)"location", 8, 0);
+	coap_register_handler(r, COAP_REQUEST_GET, location_GET_handler);
+	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
+	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
+
+	/* Need to register on_unregister() handler. */
+	r->on_unregister = &location_on_unregister;
+
+	r->observable = 1;
+
+	/*
+	coap_add_attr(r, (unsigned char *)"ct", 2, (unsigned char *)"0", 1, 0);
+	coap_add_attr(r, (unsigned char *)"title", 5, (unsigned char *)"\"Internal Clock\"", 16, 0);
+	coap_add_attr(r, (unsigned char *)"rt", 2, (unsigned char *)"\"Ticks\"", 7, 0);
+	coap_add_attr(r, (unsigned char *)"if", 2, (unsigned char *)"\"clock\"", 7, 0);
+	*/
+
+	return r;
+}
+
+void
+location_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	generic_GET_handler(context, resource, peer, request, token, response,
+			ZESENSE_SENSOR_TYPE_LOCATION);
+
+}
+
+void
+location_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+
+	generic_on_unregister(ctx, reg, ZESENSE_SENSOR_TYPE_LOCATION);
+}
+
+/*------------------------------- Generics -----------------------------------------------*/
+void
+generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response,
+	      int sensor) {
 
 	LOGI("Recognized accelerometer GET request, entered handler!");
 
@@ -102,7 +168,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 			 * unless he's given it up spontaneously for some strange reason,
 			 * in which case there might be a STREAM STOPPED message on the fly,
 			 * either still in the other thread's body or in the other queue.. */
-			put_sm_buf_item(context->smreqbuf, SM_REQ_START, ASENSOR_TYPE_ACCELEROMETER,
+			put_sm_buf_item(context->smreqbuf, SM_REQ_START, sensor,
 					(coap_ticket_t)coap_registration_checkout(reg), freq);
 
 
@@ -157,7 +223,7 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 		asy = coap_register_async(context, peer, request,
 				COAP_ASYNC_SEPARATE, NULL);
 
-		put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, ASENSOR_TYPE_ACCELEROMETER,
+		put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, sensor,
 				(coap_ticket_t)asy->id, 0);
 
 		/* As per CoAP observer draft, clear this registration.
@@ -175,7 +241,8 @@ accel_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 }
 
 void
-accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+generic_on_unregister(coap_context_t *ctx, coap_registration_t *reg,
+		int sensor) {
 
 	LOGI("Accelerometer on_unregister entered..");
 
@@ -192,7 +259,10 @@ accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 	 * If the streaming manager does not have any stream
 	 * with that ticket (should not happen) it confirms the cancellation anyways.
 	 */
-	put_sm_buf_item(ctx->smreqbuf, SM_REQ_STOP, ASENSOR_TYPE_ACCELEROMETER,
+	put_sm_buf_item(ctx->smreqbuf, SM_REQ_STOP, sensor,
 			(coap_ticket_t)/*coap_registration_checkout(*/reg/*)*/, 0);
 
 }
+
+
+

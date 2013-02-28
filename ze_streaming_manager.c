@@ -12,6 +12,7 @@
 #include "ze_coap_server_root.h"
 #include "ze_log.h"
 #include "utlist.h"
+#include "ze_coap_payload.h"
 
 stream_context_t *
 get_streaming_manager(/*coap_context_t  *cctx*/) {
@@ -31,7 +32,11 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 	temp->sensorManager = NULL;
 	temp->sensorEventQueue = NULL;
 	temp->looper = NULL;
-	temp->gpsManager = NULL;
+
+	/* TODO Initialize properly the .sensors array,
+	 * even though the memset above likely does already
+	 * this job
+	 */
 
 	return temp;
 }
@@ -39,10 +44,11 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 /* Some forward declarations for functions that are not really interface
  * and therefore not suitable in the header file. */
 int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
-		coap_ticket_t ticket, int conf, ze_payload_t *pyl,
+		coap_ticket_t ticket, int conf, /*ze_payload_t *pyl*/ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
-
+ze_payload_t *
+form_data_payload(ASensorEvent event);
 
 void *
 ze_coap_streaming_thread(void* args) {
@@ -63,8 +69,8 @@ ze_coap_streaming_thread(void* args) {
 	lt = time(NULL);
 
 	// Attach thread to Dalvik
-	jint attached = (*jvm)->AttachCurrentThread(jvm, &(mngr->env), NULL);
-	if ( attached!=0 ) LOGW("SM cannot attach thread");
+	jint failattach = (*jvm)->AttachCurrentThread(jvm, &(mngr->env), NULL);
+	if ( failattach ) LOGW("SM cannot attach thread");
 
 	// Register in context the ZeGPSManager class
 	mngr->ZeGPSManager = ar->ZeGPSManager;
@@ -78,52 +84,36 @@ ze_coap_streaming_thread(void* args) {
     // Take the SensorManager (C++ singleton class)
     mngr->sensorManager = ASensorManager_getInstance();
     LOGI("SM, got sensorManager");
+
     // Create event queue associated with that looper //XXX !!! wtf is 45 ??
     mngr->sensorEventQueue =
     		ASensorManager_createEventQueue(mngr->sensorManager, mngr->looper, 45, NULL, NULL);
     LOGI("SM, got sensorEventQueue");
 
-    // Create ZeGPSManager instance and initialize it
+    /* Create ZeGPSManager instance and initialize it
+     * Note that it is placed inside a ze_sensor_t's
+     * gpsManager attribute, to be consistent with the
+     * android_handle attribute that we create for
+     * each sensor. */
     jmethodID ZeGPSManager_constructor =
     		(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "<init>", "()V");
-	if ( !ZeGPSManager_constructor ) LOGW("ZeGPSManager constructor not found");
-
-	LOGW("Got constructor");
-
-    mngr->gpsManager = (*mngr->env)->NewObject(mngr->env, mngr->ZeGPSManager, ZeGPSManager_constructor);
-    if ( !mngr->gpsManager) LOGW("ZeGPSManager instance cannot be constructed");
-
-    LOGW("Object constructed");
-
 	jmethodID ZeGPSManager_init =
 			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "init", "(Landroid/content/Context;)V");
-	if ( !ZeGPSManager_init ) LOGW("ZeGPSManager's init() not found");
-
-	LOGW("Got method id");
-
-	(*mngr->env)->CallVoidMethod(mngr->env, mngr->gpsManager, ZeGPSManager_init, actx);
-
-	LOGW("Called init()");
-
-	/*
-	jmethodID ZeGPSManager_destroy =
-			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "destroy", "()V");
-	if ( !ZeGPSManager_destroy ) LOGW("ZeGPSManager's destroy() not found");
-	 */
-
-	jmethodID ZeGPSManager_start =
-			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "startStream", "()I");
-	if ( !ZeGPSManager_start ) LOGW("ZeGPSManager's startStream() not found");
-
-	jint sta = (*mngr->env)->CallIntMethod(mngr->env, mngr->gpsManager, ZeGPSManager_start);
-	LOGW("from GPSManager %d", sta);
-
+	if ( !ZeGPSManager_constructor || !ZeGPSManager_init ) LOGW("ZeGPSManager's methods not found");
+    mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager =
+    		(*mngr->env)->NewObject(mngr->env, mngr->ZeGPSManager, ZeGPSManager_constructor);
+    if ( !mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager)
+    	LOGW("ZeGPSManager instance cannot be constructed");
+	(*mngr->env)->CallVoidMethod(mngr->env, mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager,
+			ZeGPSManager_init, actx);
 
 
 	ASensorEvent event;
 	jobject location;
 
 	ze_payload_t *pyl = NULL;
+
+	ze_sm_packet_t pk;
 
 	int rto, rtc, max_age;
 
@@ -142,12 +132,10 @@ ze_coap_streaming_thread(void* args) {
 	jclass Location = (*mngr->env)->FindClass(mngr->env, "android/location/Location");
 	if ( !Location ) LOGW("Class Location not found");
 
-	//double getLatitude()
 	jmethodID Location_getLatitude =
 			(*mngr->env)->GetMethodID(mngr->env, Location, "getLatitude", "()D");
 	if ( !Location_getLatitude ) LOGW("Method getLatitude not found");
 
-	//long getTime()
 	jmethodID Location_getTime =
 			(*mngr->env)->GetMethodID(mngr->env, Location, "getTime", "()J");
 	if ( !Location_getTime ) LOGW("Method getTime not found");
@@ -159,10 +147,10 @@ ze_coap_streaming_thread(void* args) {
 	 */
 	int queuecount = 0;
 
-	/* Internal anti-deadlock miniqueue. */
+	/* Internal anti-deadlock mini queue. */
 	sm_req_internal_t *adqueue = NULL;
 
-	while(!globalexit) { /*thread loop start*/
+	while(!globalexit) { /*------- Thread loop start ---------------------------------*/
 
 		/*-------------------------Serve request queue---------------------------------*/
 
@@ -194,36 +182,29 @@ ze_coap_streaming_thread(void* args) {
 		}
 		else if (sm_req.rtype == SM_REQ_ONESHOT) {
 			LOGI("SM we got a ONESHOT request");
-			if (mngr->sensors[sm_req.sensor].android_handle != NULL) {
+			if (mngr->sensors[sm_req.sensor].is_active != NULL) {
 				/* Sensor is active, suppose cache is fresh
-				 * and serve the oneshot request immediately
-				 */
+				 * and serve the oneshot request immediately. */
 
-				/* Take sample from cache and form payload */
+				LOGI("SM serving oneshot request from cache");
+
 				event = mngr->sensors[sm_req.sensor].event_cache;
-				pyl = malloc(sizeof(ze_payload_t));
-				if (pyl == NULL)
-					LOGW("malloc failed!");
-				pyl->length = sizeof(ASensorEvent);
-				pyl->data = malloc(pyl->length);
-				if (pyl->data == NULL)
-					LOGW("malloc failed!");
-				memcpy(pyl->data, &event, pyl->length);
-				pyl->wts = event.timestamp;
-				pyl->rtpts = 0; //FIXME
+				//pyl = form_data_payload(event);
+				pk = form_sm_packet(event);
 
 				/* Mirror the received request in the sender's interface
 				 * attaching the payload. Do not free pyl because not it
-				 * is needed by the notbuf.
-				 */
+				 * is needed by the notbuf. */
 				put_coap_helper(notbuf, COAP_SEND_ASYNCH, sm_req.ticket,
-						COAP_MESSAGE_NON, pyl, smreqbuf, adqueue);
+						COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 			}
 			else {
 				/* Sensor is not active, cache may be old.
 				 * Activate the sensor and register oneshot request
 				 * to be satisfied by the first matching sample that
-				 * emerges from the sample queue
+				 * emerges from the sample queue.
+				 * Android's interface does not allow to ask for only
+				 * one sample from a sensor.
 				 */
 				android_sensor_activate(mngr, sm_req.sensor, DEFAULT_FREQ);
 
@@ -243,7 +224,7 @@ ze_coap_streaming_thread(void* args) {
 
 		/* Clean temporary variables that are reused in the next phase.
 		 * No need to free what they point to so far, they only serve
-		 * as temporary pointers for searches or similar */
+		 * as temporary pointers for searches or similar. */
 		osreq = NULL;
 		stream = NULL;
 
@@ -270,40 +251,23 @@ ze_coap_streaming_thread(void* args) {
              */
 			if (mngr->sensors[event.type].oneshots != NULL) {
 
-				/* Form payload, it will be the same for each oneshot. */
-				pyl = malloc(sizeof(ze_payload_t));
-				if (pyl == NULL)
-					LOGW("malloc failed!");
-				pyl->length = sizeof(ASensorEvent);
-				pyl->data = malloc(pyl->length);
-				if (pyl->data == NULL)
-					LOGW("malloc failed!");
-				memcpy(pyl->data, &event, pyl->length);
-				pyl->wts = event.timestamp;
-				pyl->rtpts = 0; //TODO
-
 				/* Empty this list freeing its elements. */
 				while (mngr->sensors[event.type].oneshots != NULL) {
+
+					/* Allocate a new payload. */
+					//pyl = form_data_payload(event);
+					pk = form_sm_packet(event);
 					/* Take first element. */
 					osreq = mngr->sensors[event.type].oneshots;
 					/* Use its ticket to send the sample */
 					put_coap_helper(notbuf, COAP_SEND_ASYNCH,
-							osreq->one, COAP_MESSAGE_CON, pyl, smreqbuf, adqueue);
-					/* Let the head point to the next element before freeing the former. */
+							osreq->one, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
+					/* Unplug before freeing. */
 					mngr->sensors[event.type].oneshots = osreq->next;
 					free(osreq);
 
-					onescroll = mngr->sensors[event.type].oneshots;
-					while (onescroll != NULL) {
-						LOGI("SM oneshot register this entry tick%d", (int)onescroll->one.tid);
-						onescroll = onescroll->next;
-					}
-
+					/* Do not free pks because they are carried downwards. */
 				}
-
-				/* Do not free pyl because it
-				 * is needed by the notbuf.
-				 */
 
 				/* All oneshots cleared, if there are no streams active
 				 * we're entitled to turn off the sensor.
@@ -313,37 +277,40 @@ ze_coap_streaming_thread(void* args) {
 			}
 
 			/* Done with the oneshots,
-			 * now this sample might also belong to some stream
+			 * now this sample might also belong to some stream.
+			 * Here we have to add the timestamp and sequence number
+			 * to the payload, casting the payload depending on the
+			 * sensor type!
 			 */
 			if (mngr->sensors[event.type].streams != NULL) {
 
-				/* Form payload, though it will change for every stream. */
-				pyl = malloc(sizeof(ze_payload_t));
-				if (pyl == NULL)
-					LOGW("malloc failed!");
-				pyl->length = sizeof(ASensorEvent);
-				pyl->data = malloc(pyl->length);
-				if (pyl->data == NULL)
-					LOGW("malloc failed!");
-				memcpy(pyl->data, &event, pyl->length);
-				pyl->wts = event.timestamp;
-				//pyl->rtpts = 4567; //TODO
-
-				/* TODO: for the moment notify all the streams regardless of frequency.
-				 * wait but like this*/
+				/* TODO: for the moment notify all the streams regardless of frequency. */
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
-					put_coap_helper(notbuf, COAP_SEND_NOTIF,
-							stream->reg, COAP_MESSAGE_NON, pyl, smreqbuf, adqueue);
+
+					/* Interesting not to have a cast but since all the headers
+					 * for data packets are the same.. have a same "fake"
+					 * structure.. */
+					/* Allocate a new payload for each notification sent. */
 					/*
-					 * we'll likely need to do some operations here,
-					 * like increment the sequence number
-					 * or stuff like that
-					 */
+					pyl = form_data_payload(event);
+					if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
+						ze_accel_paydata_t *pa = (ze_accel_paydata_t*)pyl->data;
+						//pa->pdhdr.sn = htonl(stream->last_sn + 1);
+						pa->pdhdr.ts = htonl(4567); //TODO
+					}*/
+					pk = form_sm_packet(event);
+					pk->rtpts = 4567;
+
+					put_coap_helper(notbuf, COAP_SEND_NOTIF,
+							stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
+
+					stream->last_sn++;
+
 					stream = stream->next;
 				}
 
-				/* Do not free pyl because not it
+				/* Do not free pks because not it
 				 * is needed by the notbuf.
 				 */
 			}
@@ -362,7 +329,8 @@ ze_coap_streaming_thread(void* args) {
 				 * Although it is useful for turning off the sensor
 				 * that produced a oneshot, in the case the oneshots are
 				 * served and there's no stream active. OK then
-				 * move it at the end, with a lookahead to the streams.
+				 * move it at the end of the oneshot section,
+				 * with a lookahead to the emptyness of the streams.
 				 */
 			}
 
@@ -373,12 +341,14 @@ ze_coap_streaming_thread(void* args) {
 		queuecount = 0;
 
 
-		/*------- Now GPS, if any... */
+		/*------- Now a check at the GPS.. ------------------------------------------ */
+		/* This can be done infrequently because the frequency of GPS updates is
+		 * definitely not so high as an accelerometer can be for instance. Therefore
+		 * we can keep it outside the QUEUE_REQ_RATIO scope, and still a lot of
+		 * checks will end up empty handed. */
 
-		//double getLatitude()
-
-		location = (*mngr->env)->
-				CallObjectMethod(mngr->env, mngr->gpsManager, ZeGPSManager_getSample);
+		location = 	(*mngr->env)->CallObjectMethod(mngr->env,
+				mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager, ZeGPSManager_getSample);
 		if ( location ) { //Queue not empty, it'd be NULL otherwise
 
 			jdouble loc_lat = (*mngr->env)->
@@ -399,20 +369,22 @@ ze_coap_streaming_thread(void* args) {
 	} /*thread loop end*/
 
 
-	jmethodID ZeGPSManager_stop =
-			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "stopStream", "()I");
-	if ( !ZeGPSManager_stop ) LOGW("ZeGPSManager's stopStream() not found");
-	jint sto = (*mngr->env)->CallIntMethod(mngr->env, mngr->gpsManager, ZeGPSManager_stop);
-	LOGW("from GPSManager %d", sto);
-
 	/*
 	 * TODO: Turn off all sensors that might still be active!
 	 * E.g. asked to quit the server while a stream is in
-	 * process..
+	 * process.. done this for GPS but not yet for the other
+	 * sensors..
 	 */
+	jmethodID ZeGPSManager_destroy =
+			(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "destroy", "()V");
+	if ( !ZeGPSManager_destroy ) LOGW("ZeGPSManager's destroy() not found");
+	(*mngr->env)->CallIntMethod(mngr->env,
+			mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager, ZeGPSManager_destroy);
+
 
 	/* Detach this thread from JVM. */
 	(*jvm)->DetachCurrentThread(jvm);
+
 
 	LOGI("Streaming Manager out of thread loop, returning..");
 }
@@ -420,7 +392,7 @@ ze_coap_streaming_thread(void* args) {
 /*------------------ Anti-deadlock queue wrappers -----------------------------------*/
 
 int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
-		coap_ticket_t ticket, int conf, ze_payload_t *pyl,
+		coap_ticket_t ticket, int conf, /*ze_payload_t *pyl,*/ ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
 
 	int result;
@@ -432,7 +404,7 @@ int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
 	 * we'll fetch from list head.
 	 * Loop until the original put succeeds.
 	 */
-	result = put_coap_buf_item(notbuf, rtype, ticket, conf, pyl);
+	result = put_coap_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
 	while (result == ETIMEDOUT) {
 		LOGW("Deadlock resolution mechanism kicked in!");
 		/* Take some memory for the queue element and copy.
@@ -453,7 +425,7 @@ int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
 		temp->req = get_sm_buf_item(smreqbuf);
 		LL_APPEND(adqueue, temp);
 
-		result = put_coap_buf_item(notbuf, rtype, ticket, conf, pyl);
+		result = put_coap_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
 	}
 	return 1;
 }
@@ -500,23 +472,26 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	 * frequency divider to be considered based on the current sampling frequency
 	 */
 
-	if ( mngr->sensors[sensor_id].android_handle == NULL ) {
+	//if ( mngr->sensors[sensor_id].android_handle == NULL ) {
+	if ( !(mngr->sensors[sensor_id].is_active) ) {
 		/* Sensor is not active, activate in any case
 		 * Put a check anyway, if a sensor is not active
 		 * the streams should be empty
 		 */
 		if (mngr->sensors[sensor_id].streams != NULL)
-			LOGW("SM inconsistent state");
+			LOGW("SM inconsistent state, sensor is not active but there"
+					"are streams active on it");
 
 		android_sensor_activate(mngr, sensor_id, freq);
 	}
 	/* Sensor is already active.
 	 * Re-evaluate its frequency based on the new request
 	 */
-	else if (freq > mngr->sensors[sensor_id].freq) {
+	else if ( freq > mngr->sensors[sensor_id].freq ) {
 		mngr->sensors[sensor_id].freq = freq;
 		android_sensor_changef(mngr, sensor_id, freq);
 	}
+	else LOGI("SM sensor is already active and no need to change f");
 
 	/* Replace if there is a stream with the same ticket
 	 * otherwise just append..
@@ -668,27 +643,78 @@ ze_oneshot_t *sm_find_oneshot(stream_context_t *mngr, int sensor_id, coap_ticket
 
 /*---------------------Sensors helpers--------------------------------------------*/
 
+/*
+ * They do not check the sensor state,
+ * they merely execute assuming a sensor
+ * state suitable for their work.
+ */
+
+// REMARK
+/* We model all the sensors, GPS included, with the ze_sensor_t
+ * struct, but the interface to act on the GPS is different
+ * between all the other sensors. As a consequence of this modeling
+ * only one of ze_sensor_t's android_handle or gpsManager, which
+ * are the handles to a particular sensor interface instance,
+ * will be valid for each instance of the struct.
+ * android_handle will be the valid one for all sensors in
+ * ZE_NUMSENSORS scope (1-14) except for sensor 14 (location)
+ * for which
+ * TODO: to be consistent to this modeling we should also
+ * store the sensor_id in the ze_sensor_t struct so that each
+ * instance is self-descriptive; at the moment the mapping
+ * between ze_sensor_t instance and the sensor it represents is
+ * memorized with outer data.
+ */
+
 int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 
 	LOGI("SM Turning on android sensor%d", sensor);
 
 	//CHECK_OUT_RANGE(sensor);
 
-	/* Grab reference from Android */
-	mngr->sensors[sensor].android_handle =
-			ASensorManager_getDefaultSensor(mngr->sensorManager, sensor);
+	if (sensor == ZESENSE_SENSOR_TYPE_LOCATION) {
+		/* Goes through our manager. Different from the other
+		 * sensors, the reference to the GPS we take it only
+		 * once at the beginning, even if the client never
+		 * asks for GPS. Here we do only the equivalent of
+		 * ASensorEventQueue_enableSensor. The equivalent
+		 * of ASensorManager_getDefaultSensor is done at
+		 * thread start only once.
+		 */
+		jmethodID ZeGPSManager_start =
+				(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "startStream", "()I");
+		if ( !ZeGPSManager_start ) LOGW("ZeGPSManager's startStream() not found");
+		jint started = (*mngr->env)->CallIntMethod(mngr->env,
+				mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager, ZeGPSManager_start);
 
-	/* Enable sensor at the specified frequency */
-	if (mngr->sensors[sensor].android_handle != NULL) {
-		ASensorEventQueue_enableSensor(mngr->sensorEventQueue,
-				mngr->sensors[sensor].android_handle);
-		ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
-				mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
+		if (started) {
 
-		return 0;
+			/* Properly flag it. */
+			mngr->sensors[sensor].is_active = 1;
+
+			return 0;
+		}
+	}
+	else {
+		/* Grab reference from Android */
+		mngr->sensors[sensor].android_handle =
+				ASensorManager_getDefaultSensor(mngr->sensorManager, sensor);
+
+		/* Enable sensor at the specified frequency */
+		if ( mngr->sensors[sensor].android_handle != NULL ) {
+			ASensorEventQueue_enableSensor(mngr->sensorEventQueue,
+					mngr->sensors[sensor].android_handle);
+			ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
+					mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
+
+			/* Properly flag it. */
+			mngr->sensors[sensor].is_active = 1;
+
+			return 0;
+		}
 	}
 
-	LOGW("cannot get sensor %d", sensor);
+	LOGW("SM cannot activate sensor %d", sensor);
 	return SM_ERROR;
 }
 
@@ -698,32 +724,130 @@ int android_sensor_changef(stream_context_t *mngr, int sensor, int freq) {
 
 	//CHECK_OUT_RANGE(sensor);
 
-	if (mngr->sensors[sensor].android_handle == NULL) {
-		LOGW("SM inconsistent state in streaming manager, asked changef"
-				"but sensor not initialized in Android");
-		return SM_ERROR;
-	}
+	if (sensor == ZESENSE_SENSOR_TYPE_LOCATION) {
 
-	ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
-			mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
+		jmethodID ZeGPSManager_changefrequency =
+				(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "changeFrequency", "()I");
+		if ( !ZeGPSManager_changefrequency ) LOGW("ZeGPSManager's changeFrequency() not found");
+
+		jint changed = (*mngr->env)->CallIntMethod(mngr->env,
+				mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager, ZeGPSManager_changefrequency);
+
+		// TODO parameters to changeFrequency()
+
+		if (!changed) return SM_ERROR;
+	}
+	else {
+
+		int error = ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
+				mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
+
+		if (error < 0) return SM_ERROR;
+	}
 	return 0;
 }
 
 
 int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 
-	LOGI("SM Turning off android sensor%d", sensor);
+	LOGI("SM Turning off Android sensor %d", sensor);
 
 	//CHECK_OUT_RANGE(sensor);
 
-	if (mngr->sensors[sensor].android_handle == NULL) {
-		LOGW("SM inconsistent state in streaming manager, asked turnoff"
-				"but sensor not initialized in Android");
-		return SM_ERROR;
+	if (sensor == ZESENSE_SENSOR_TYPE_LOCATION) {
+
+		jmethodID ZeGPSManager_stop =
+				(*mngr->env)->GetMethodID(mngr->env, mngr->ZeGPSManager, "stopStream", "()I");
+		if ( !ZeGPSManager_stop ) LOGW("ZeGPSManager's stopStream() not found");
+
+		jint stopped = (*mngr->env)->CallIntMethod(mngr->env,
+				mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager, ZeGPSManager_stop);
+
+		if (!stopped) return SM_ERROR;
+
+		/*
+		 * Remark: can't NULL gpsManager because we don't get
+		 * this reference every time we activate a sensor but
+		 * only once at thread start!
+		 */
+	}
+	else {
+
+		int error = ASensorEventQueue_disableSensor(mngr->sensorEventQueue,
+				mngr->sensors[sensor].android_handle);
+
+		if (error < 0) return SM_ERROR;
+
+		mngr->sensors[sensor].android_handle = NULL;
+		/* Not clear how Android leaves this pointer,
+		 * though it is important because we look at
+		 * the NULLity of this pointer to see whether
+		 * a sensor is active or not.
+		 */
 	}
 
-	ASensorEventQueue_disableSensor(mngr->sensorEventQueue,
-			mngr->sensors[sensor].android_handle);
-	mngr->sensors[sensor].android_handle = NULL; //Not clear how Android leaves this pointer
+	mngr->sensors[sensor].is_active = 0;
+
 	return 0;
 }
+
+
+/*
+ *
+ */
+ze_sm_packet_t *
+form_sm_packet(ASensorEvent event) {
+
+	ze_sm_packet_t *c = malloc(sizeof(ze_sm_packet_t));
+	if (c==NULL) return NULL;
+	memset(c, 0, sizeof(ze_sm_packet_t));
+
+	c->sensor = ASENSOR_TYPE_ACCELEROMETER;
+	c->rtpts = 0;
+	c->ntpts = event.timestamp;
+
+	if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
+		ze_accel_vector_t *temp = malloc(sizeof(ze_accel_vector_t));
+		if (temp==NULL) return NULL;
+		memset(temp, 0, sizeof(ze_accel_vector_t));
+		sprintf(temp->x, "%e", event.acceleration.x);
+		sprintf(temp->y, "%e", event.acceleration.y);
+		sprintf(temp->z, "%e", event.acceleration.z);
+		c->data = temp;
+		c->length = sizeof(ze_accel_vector_t);
+	}
+	else {
+		//...
+	}
+
+	return c;
+}
+
+
+/*ze_payload_t *
+form_data_payload(ASensorEvent event) {
+
+	ze_payload_t *c = malloc(sizeof(ze_payload_t));
+	if (c==NULL) return NULL;
+	c->data = 0;
+	c->length = 0;
+
+	if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
+		ze_accel_paydata_t *temp = malloc(sizeof(ze_accel_paydata_t));
+		if (temp==NULL) return NULL;
+		memset(temp, 0, sizeof(ze_accel_paydata_t));
+		temp->phdr.packet_type = htonl(DATAPOINT);
+		temp->pdhdr.sensor_type = htonl(ASENSOR_TYPE_ACCELEROMETER);
+		//temp->pdhdr.sn = 0;
+		temp->pdhdr.ts = 0;
+		sprintf(temp->x, "%e", event.acceleration.x);
+		sprintf(temp->y, "%e", event.acceleration.y);
+		sprintf(temp->z, "%e", event.acceleration.z);
+		c->data = temp;
+		c->length = sizeof(ze_accel_paydata_t);
+	}
+	else {
+
+	}
+	return c;
+}*/

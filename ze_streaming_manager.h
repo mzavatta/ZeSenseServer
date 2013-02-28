@@ -124,22 +124,54 @@ typedef struct ze_stream_t {
 	/* Streaming Manager local status variables. */
 	int last_wts;	//Last wallclock timestamp
 	int last_rtpts;	//Last RTP timestamp
+	int last_sn;
 	int freq_div;	//Frequency divider
 } ze_stream_t;
 
 typedef struct ze_sensor_t {
-	/* Association sensor-resource */
-	int sensor; //Useless if we use an array whose index is mirrored to sensor types
+	/* Association sensor-resource.
+	 * (deprecated, use ticketing
+	 * mechanism instead) */
 	//str uri;
 
-	/* XXX: does const make sense? */
+	int sensor; /* Useless if we use an array
+				 * whose index is mirrored to sensor types
+				 * but still useful to make an instance of
+				 * this struct self-descriptive. */
+
+	/* XXX: does const make sense?
+	 * XXX: why not a union? */
 	ASensor* android_handle;
+	jobject gpsManager; //an instance of ZeGPSManager
+
+	/* Consider an "is_active" flag,
+	 * indeed the NDK sensor API does not offer
+	 * a way to know whether a ASensor* sensor
+	 * is active or not. Thus we do not offer it
+	 * in our GPSManager either.
+	 *
+	 * Either we do it keeping android_handle and
+	 * gpsManager NULL when not active
+	 * or we create and manage a flag.
+	 *
+	 * The NULL approach might work with android_handle
+	 * because we get this pointer every time we
+	 * turn on a sensor, but it does not work with
+	 * gpsManager because we get it once and reuse
+	 * the same reference (if we NULL it when the sensor
+	 * is turned off and the client later requests
+	 * again this sensor, we don't have the reference
+	 * any longer).
+	 *
+	 * To make it uniform the is_active flag
+	 * is probably the best solution.
+	 */
+	int is_active; // 1 if active, 0 if not.
 
 	/* Quick access to last known sensor value */
 	ASensorEvent event_cache;
 
 	/* List of streams registered on this sensor */
-	//ze_single_stream_t *streams = NULL;
 	ze_stream_t *streams;
 
 	/* List of one-shot requests registered on this sensor */
@@ -176,8 +208,15 @@ typedef struct stream_context_t {
 
 	JNIEnv* env;
 	jclass ZeGPSManager; //the Java class object
-	jobject gpsManager; //an instance of ZeGPSManager
 } stream_context_t;
+
+typedef struct {
+	int sensor;
+	long ntpts;
+	int rtpts;
+	unsigned char *data;
+	int length;
+} ze_sm_packet_t;
 
 /*
 inline int CHECK_OUT_RANGE(int sensor) {

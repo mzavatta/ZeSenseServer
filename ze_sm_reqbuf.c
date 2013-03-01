@@ -52,7 +52,7 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
 
 
 int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
-		coap_ticket_t ticket, int freq) {
+		ticket_t ticket, int freq) {
 
 	LOGI("SM buffer PUT invoked");
 

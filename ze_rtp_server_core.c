@@ -15,12 +15,12 @@
 #include <time.h>
 
 #include "ze_streaming_manager.h"
+#include "ze_sm_resbuf.h"
+#include "ze_coap_server_core.h"
+#include "ze_timing.h"
+#include "ze_rtp_server_core.h"
 
-#define RTP_PAYLOAD_TYPE 80 //unassigned 35-71 and 77-95
 
-#define RTP_TSCLOCK_FREQ 100
-
-#define RTCP_SR_BANDWIDTH_THRESHOLD 1000
 /*
  * Create the streams records that we want to send
  * (init function for the stream record here is useful)
@@ -42,7 +42,7 @@
  */
 
 
-int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *smreqbuf) {
+int cc(rtp_context_t rctx, ze_sm_response_buf_t *notbuf, ze_sm_request_buf_t *smreqbuf) {
 
 	fd_set readfds;
 	struct timeval tv, *timeout;
@@ -52,17 +52,19 @@ int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *s
 
 	int freq = 20;
 
-	rtp_stream_t str;
+	rtp_stream_t *str;
+
+	ze_sm_response_t req;
 
 	/* --- create a stream and start it in the Streaming Manager. */
 	str = rtp_stream_init();
 	if (str==NULL) return -1;
 	LL_APPEND(rctx->streams, str);
-	str->lasthdr->ssrc = rand();
-	str->lasthdr->seqn = rand();
-	str->lasthdr->timestamp = rand();
+	str->ssrc = rand();
+	str->seqn = rand();
+	//str->lasthdr->timestamp = rand();
 	put_sm_buf_item(smreqbuf, SM_REQ_START, ASENSOR_TYPE_ACCELEROMETER,
-			(coap_ticket_t)str, freq);
+			(ticket_t)str, freq);
 
 
 	//TODO handle participant timeout
@@ -98,17 +100,16 @@ int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *s
 			/* Start by fetching an SM request and dispatch it
 			 */
 			req = get_coap_buf_item(notbuf);
-			/* Recall that the getter does not do any checkout not free
-			 * Under this model only the CoAP server manages the ticket
-			 */
+			ze_sm_packet_t *reqpacket = (ze_sm_packet_t *)req.pk;
 
 			if (req.rtype == STREAM_STOPPED) {
 				LOGI("CS Got a STREAM STOPPED command");
+				str = (rtp_stream_t *)req.ticket;
 				/* We're sure that no other notification will arrive
 				 * with that ticket.
 				 * We destroy the stream record, nobody holds its pointer
 				 * anymore. */
-				LL_DELETE(rctx->streams, req.ticket.str);
+				LL_DELETE(rctx->streams, str);
 			}
 			else if (req.rtype == ONESHOT) {
 				LOGI("CS Got a SEND ASYNCH command");
@@ -116,6 +117,8 @@ int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *s
 			}
 			else if (req.rtype == STREAM_NOTIFICATION) {
 				LOGI("CS Got a SEND NOTIF command");
+
+				str = (rtp_stream_t *)req.ticket;
 
 				/* Here I have to check if the registration
 				 * that corresponds to the ticket is still
@@ -128,36 +131,33 @@ int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *s
 				 * STREAM STOPPED confirmation, just forget
 				 * about it.
 				 */
-				if ( !req.ticket.str->invalid ) {
+				if ( !str->invalid ) {
 					/* Here we send the RTP packet and then check the byte count
-					 * or the packet count. Every some time we send an
+					 * or the packet count. Every some time we send an RTCP packet;
 					 */
 
-					/*
-					typedef struct ze_payload_t {
-						int64_t wts;
-						unsigned int rtpts;
-						int length;
-						unsigned char *data;
-					} ze_payload_t;*/
+					str->ntptwin = reqpacket->ntpts;
+					str->rtptwin = reqpacket->rtpts;
 
 					/* Cook PDU. */
-					rtp_pdu_t pdu = rtp_pdu_init(0, 0, req.pyl->length);
-					//todo bitwise
+					rtp_pdu_t pdu = rtp_pdu_init(0, 0, reqpacket->length+sizeof(rtp_payload_hdr_t));
+					pdu->hdr->padding = 0;
+					//extension assigned by rtp_pdu_init
+					//CSRC count as well
 					pdu->hdr->marker = 0;
 					pdu->hdr->ptype = RTP_PAYLOAD_TYPE;
-					pdu->hdr->seqn = req.ticket.str->lasthdr->seqn++;
-					pdu->hdr->ssrc = req.ticket.str->lasthdr->ssrc;
-					pdu->hdr->timestamp = ; //TODO
+					pdu->hdr->seqn = htons(str->seqn++);
+					pdu->hdr->timestamp = htonl(reqpacket->rtpts);
+					pdu->hdr->ssrc = htonl(str->ssrc);
+					rtp_payload_hdr_t *pht = (rtp_payload_hdr_t*)pdu->data;
+					pht->sensor = htonl(reqpacket->sensor);
+					pht = pht + sizeof(rtp_payload_hdr_t);
+					memcpy(pht, reqpacket->data, reqpacket->length);
 
-					req.ticket.str->lastsamplentp = req.pyl->wts;
+					rtp_send_impl(rctx, &str->dest, pdu);
 
-					rtp_send_impl(rctx, &req.ticket.str->dest, pdu);
-
-					memcpy(req.ticket.str->lasthdr, pdu->hdr, sizeof(rtp_hdr_t));
-
-					req.ticket.str->octectcount+=req.pyl->length;
-					req.ticket.str->packetcount++;
+					str->octectcount+=reqpacket->length;
+					str->packetcount++;
 
 					/*
 					 * Here we decide when to report based on the bandwidth. Although Perkins 2003
@@ -165,11 +165,12 @@ int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *s
 					 * of the session; typically it is on the order of 5 seconds for small sessions,
 					 * but it can increase to several minutes for very large groups"
 					 */
-					if (req.ticket.str->packetcount == 1 ||
-							req.ticket.str->octectcount >
-								req.ticket.str->last_rtcp_octectcount + RTCP_SR_BANDWIDTH_THRESHOLD) {
+					if (str->packetcount == 1 ||
+							str->octectcount >
+								str->last_rtcp_octectcount + RTCP_SR_BANDWIDTH_THRESHOLD) {
 						//send RTCP SR
-						rtcp_pdu_t *sr = build_minimal_sr(rctx->cname, rctx->cnamel, req.ticket.str->lasthdr->ssrc);
+						rtcp_pdu_t *sr = build_minimal_sr(rctx->cname, rctx->cnamel, str->ssrc);
+						/* left to add ntp, rtp, oc, pc. */
 						rtcp_sr_t *srtemp = (rtcp_sr_t)(sr->hdr+srsizeof(rtcp_hdr_t));
 
 						srtemp->ntpts = get_ntp();
@@ -179,16 +180,16 @@ int cc(rtp_context_t rctx, ze_coap_request_buf_t *notbuf, ze_sm_request_buf_t *s
 						 * previous data packet, because some time will have elapsed since the
 						 * data in that packet was sampled. (Perkins 2003)
 						 */
-						long ntpdiff = srtemp->ntpts - req.ticket.str->lastsamplentp;
+						long ntpdiff = srtemp->ntpts - str->ntptwin;
 						float freqdiv = (float)RTP_TSCLOCK_FREQ/1000000000LL;
 						//TODO, check the rounding that is performed
-						srtemp->rtpts = req.ticket.str->lasthdr->timestamp +
+						srtemp->rtpts = str->rtptwin +
 								(int)(ntpdiff*freqdiv);
 
-						srtemp->ocount = req.ticket.str->octectcount;
-						srtemp->pcount = req.ticket.str->packetcount;
+						srtemp->ocount = str->octectcount;
+						srtemp->pcount = str->packetcount;
 
-						rtp_send_impl(&req.ticket.str->dest, sr);
+						rtcp_send_impl(rctx, &str->dest, sr);
 					}
 
 				}

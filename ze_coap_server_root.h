@@ -32,7 +32,7 @@
 
 #include "config.h"
 #include "net.h"
-#include "ze_coap_reqbuf.h"
+#include "ze_sm_resbuf.h"
 #include "ze_sm_reqbuf.h"
 #include "ze_streaming_manager.h"
 //#include "coap.h"
@@ -47,7 +47,7 @@
 struct sm_thread_args {
 	stream_context_t *smctx;
 	ze_sm_request_buf_t *smreqbuf;
-	ze_coap_request_buf_t *notbuf;
+	ze_sm_response_buf_t *notbuf;
 	jobject actx;
 	JavaVM *jvm;
 	jclass ZeGPSManager;
@@ -55,7 +55,7 @@ struct sm_thread_args {
 struct coap_thread_args {
 	coap_context_t  *cctx;
 	ze_sm_request_buf_t *smreqbuf;
-	ze_coap_request_buf_t *notbuf;
+	ze_sm_response_buf_t *notbuf;
 };
 
 /* Global quit flag.
@@ -72,7 +72,7 @@ int go;
  * our Streaming Manager interaction through JNI
  */
 ze_sm_request_buf_t *smreqbufg;
-ze_coap_request_buf_t *notbufg;
+ze_sm_response_buf_t *notbufg;
 
 //jint
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz);

@@ -26,11 +26,11 @@
 struct ze_coap_request_buf_t;
 struct ze_coap_request_t;
 
-typedef struct ze_coap_request_t {
+typedef struct ze_sm_response_t {
 
 	/* Request header. */
 	int rtype;				//Request type
-	coap_ticket_t ticket; 	//Request ticket
+	ticket_t ticket; 	//Request ticket
 	int conf;				//Reliability desired (CON or NON)
 
 	/* Request payload, opaque type.
@@ -39,11 +39,11 @@ typedef struct ze_coap_request_t {
 	unsigned char *pk;
 	//ze_payload_t *pyl;
 
-} ze_coap_request_t;
+} ze_sm_response_t;
 
-typedef struct ze_coap_request_buf_t {
+typedef struct ze_sm_response_buf_t {
 
-	ze_coap_request_t rbuf[COAP_RBUF_SIZE];
+	ze_sm_response_t rbuf[COAP_RBUF_SIZE];
 
 	/* Indexes, wrap around according to %COAP_RBUF_SIZE*/
 	int gethere, puthere;
@@ -55,7 +55,7 @@ typedef struct ze_coap_request_buf_t {
 	pthread_mutex_t mtx;
 	pthread_cond_t notfull;
 	//pthread_cond_t notempty;
-} ze_coap_request_buf_t;
+} ze_sm_response_buf_t;
 
 /**
  * To fit our purposes:
@@ -71,7 +71,7 @@ typedef struct ze_coap_request_buf_t {
  *
  * @return The oldest item in the buffer, NULL if buffer empty
  */
-ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf);
+ze_sm_response_t get_coap_buf_item(ze_sm_response_buf_t *buf);
 
 /*
  * To fit our purposes:
@@ -91,11 +91,11 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf);
  *
  * @return Zero on success
  */
-int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
-		coap_ticket_t reg, int conf, /*ze_payload_t *pyl*/unsigned char *pk);
+int put_coap_buf_item(ze_sm_response_buf_t *buf, int rtype,
+		ticket_t reg, int conf, /*ze_payload_t *pyl*/unsigned char *pk);
 
 
-ze_coap_request_buf_t* init_coap_buf();
+ze_sm_response_buf_t* init_coap_buf();
 
 
 #endif

@@ -79,7 +79,7 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	smreqbufg = smreqbuf;
 	LOGI("Root, got smreqbuf");
 
-	ze_coap_request_buf_t *notbuf = NULL;
+	ze_sm_response_buf_t *notbuf = NULL;
 	notbuf = init_coap_buf();
 	if (notbuf == NULL)
 		return -1;
@@ -220,7 +220,7 @@ ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 }
 
 int
-ze_sm_server_root(JNIEnv* env, jobject thiz, jobject actx) {
+ze_rtp_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 
 	LOGI("ZeSense new RTP server hello, pid%d, tid%d", getpid(), gettid());
 	pthread_setname_np(pthread_self(), "ZeRoot");
@@ -268,7 +268,7 @@ ze_sm_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	smreqbufg = smreqbuf;
 	LOGI("Root, got smreqbuf");
 
-	ze_coap_request_buf_t *notbuf = NULL;
+	ze_sm_response_buf_t *notbuf = NULL;
 	notbuf = init_coap_buf();
 	if (notbuf == NULL)
 		return -1;

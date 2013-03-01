@@ -13,6 +13,7 @@
 #include "ze_log.h"
 #include "utlist.h"
 #include "ze_coap_payload.h"
+#include "ze_timing.h"
 
 stream_context_t *
 get_streaming_manager(/*coap_context_t  *cctx*/) {
@@ -43,8 +44,8 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 
 /* Some forward declarations for functions that are not really interface
  * and therefore not suitable in the header file. */
-int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
-		coap_ticket_t ticket, int conf, /*ze_payload_t *pyl*/ze_sm_packet_t *pk,
+int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
+		ticket_t ticket, int conf, /*ze_payload_t *pyl*/ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 ze_payload_t *
@@ -59,7 +60,7 @@ ze_coap_streaming_thread(void* args) {
 	struct sm_thread_args* ar = ((struct sm_thread_args*)(args));
 	stream_context_t *mngr = ar->smctx;
 	ze_sm_request_buf_t *smreqbuf = ar->smreqbuf;
-	ze_coap_request_buf_t *notbuf = ar->notbuf;
+	ze_sm_response_buf_t *notbuf = ar->notbuf;
 	JavaVM *jvm = ar->jvm;
 	jobject actx = ar->actx;
 
@@ -118,7 +119,7 @@ ze_coap_streaming_thread(void* args) {
 	int rto, rtc, max_age;
 
 	ze_sm_request_t sm_req;
-	ze_coap_request_t server_req;
+	//ze_sm_response_t server_req;
 
 	ze_oneshot_t *osreq = NULL;
 	ze_stream_t *stream = NULL;
@@ -165,14 +166,14 @@ ze_coap_streaming_thread(void* args) {
 			 * we're not able to start one.
 			 * Ok let's make it return NULL in both cases.. */
 			if ( sm_start_stream(mngr, sm_req.sensor, sm_req.ticket, sm_req.freq) == NULL)
-				put_coap_helper(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
+				put_coap_helper(notbuf, STREAM_STOPPED, sm_req.ticket,
 						ZE_PARAM_UNDEFINED, NULL, smreqbuf, adqueue);
 		}
 		else if (sm_req.rtype == SM_REQ_STOP) {
 			LOGI("SM we got a STOP STREAM request");
 			/* Note that sm_stop_stream frees the memory of the stream it deletes. */
 			if ( sm_stop_stream(mngr, sm_req.sensor, sm_req.ticket) != SM_ERROR )
-				put_coap_helper(notbuf, COAP_STREAM_STOPPED, sm_req.ticket,
+				put_coap_helper(notbuf, STREAM_STOPPED, sm_req.ticket,
 						ZE_PARAM_UNDEFINED, NULL, smreqbuf, adqueue);
 				/*
 				 * Note that we do not COAP_STREAM_STOPPED if no stream with
@@ -195,7 +196,7 @@ ze_coap_streaming_thread(void* args) {
 				/* Mirror the received request in the sender's interface
 				 * attaching the payload. Do not free pyl because not it
 				 * is needed by the notbuf. */
-				put_coap_helper(notbuf, COAP_SEND_ASYNCH, sm_req.ticket,
+				put_coap_helper(notbuf, ONESHOT, sm_req.ticket,
 						COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 			}
 			else {
@@ -213,7 +214,7 @@ ze_coap_streaming_thread(void* args) {
 
 				onescroll = mngr->sensors[sm_req.sensor].oneshots;
 				while(onescroll!=NULL) {
-					LOGI("SM oneshot register this entry tick%d", (int)onescroll->one.tid);
+					LOGI("SM oneshot register this entry tick%d", (int)onescroll->one);
 					onescroll = onescroll->next;
 				}
 			}
@@ -260,7 +261,7 @@ ze_coap_streaming_thread(void* args) {
 					/* Take first element. */
 					osreq = mngr->sensors[event.type].oneshots;
 					/* Use its ticket to send the sample */
-					put_coap_helper(notbuf, COAP_SEND_ASYNCH,
+					put_coap_helper(notbuf, ONESHOT,
 							osreq->one, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
 					/* Unplug before freeing. */
 					mngr->sensors[event.type].oneshots = osreq->next;
@@ -300,12 +301,13 @@ ze_coap_streaming_thread(void* args) {
 						pa->pdhdr.ts = htonl(4567); //TODO
 					}*/
 					pk = form_sm_packet(event);
-					pk->rtpts = 4567;
+					pk->rtpts = 4567; //TODO
 
-					put_coap_helper(notbuf, COAP_SEND_NOTIF,
+					put_coap_helper(notbuf, STREAM_NOTIFICATION,
 							stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 
-					stream->last_sn++;
+					//stream->last_sn++; moved to the coap level (packet dependent,
+					//not sensor dependent)
 
 					stream = stream->next;
 				}
@@ -391,8 +393,8 @@ ze_coap_streaming_thread(void* args) {
 
 /*------------------ Anti-deadlock queue wrappers -----------------------------------*/
 
-int put_coap_helper(ze_coap_request_buf_t *notbuf, int rtype,
-		coap_ticket_t ticket, int conf, /*ze_payload_t *pyl,*/ ze_sm_packet_t *pk,
+int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
+		ticket_t ticket, int conf, /*ze_payload_t *pyl,*/ ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
 
 	int result;
@@ -457,7 +459,7 @@ ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *
 
 /*-------------------- Stream helpers -----------------------------------------------*/
 ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
-		coap_ticket_t reg, int freq) {
+		ticket_t reg, int freq) {
 
 	LOGI("SM starting stream");
 	//CHECK_OUT_RANGE(sensor_id);
@@ -515,7 +517,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	return newstream;
 }
 
-int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg) {
+int sm_stop_stream(stream_context_t *mngr, int sensor_id, ticket_t reg) {
 
 	//CHECK_OUT_RANGE(sensor_id);
 	LOGI("SM Stopping stream");
@@ -586,17 +588,17 @@ int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg) {
  *
  * @return The reference to the item if found, NULL otherwise
  */
-ze_stream_t *sm_find_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg) {
+ze_stream_t *sm_find_stream(stream_context_t *mngr, int sensor_id, ticket_t reg) {
 
 	ze_stream_t *temp = mngr->sensors[sensor_id].streams;
 	while (temp != NULL) {
-		if (temp->reg.reg == reg.reg) break;
+		if (temp->reg == reg) break;
 		temp = temp->next;
 	}
 	return temp;
 }
 
-ze_stream_t *sm_new_stream(coap_ticket_t reg, int freq) {
+ze_stream_t *sm_new_stream(ticket_t reg, int freq) {
 
 	ze_stream_t *new;
 	new = (ze_stream_t *) malloc(sizeof(ze_stream_t));
@@ -614,7 +616,7 @@ ze_stream_t *sm_new_stream(coap_ticket_t reg, int freq) {
 	return new;
 }
 
-ze_oneshot_t *sm_new_oneshot(coap_ticket_t one) {
+ze_oneshot_t *sm_new_oneshot(ticket_t one) {
 
 	ze_oneshot_t *new;
 	new = (ze_oneshot_t *) malloc(sizeof(ze_oneshot_t));
@@ -630,11 +632,11 @@ ze_oneshot_t *sm_new_oneshot(coap_ticket_t one) {
 	return new;
 }
 
-ze_oneshot_t *sm_find_oneshot(stream_context_t *mngr, int sensor_id, coap_ticket_t one) {
+ze_oneshot_t *sm_find_oneshot(stream_context_t *mngr, int sensor_id, ticket_t one) {
 
 	ze_oneshot_t *temp = mngr->sensors[sensor_id].oneshots;
 	while (temp != NULL) {
-		if (temp->one.tid == one.tid) break;
+		if (temp->one == one) break;
 		temp = temp->next;
 	}
 	return temp;
@@ -792,9 +794,6 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 }
 
 
-/*
- *
- */
 ze_sm_packet_t *
 form_sm_packet(ASensorEvent event) {
 
@@ -802,11 +801,11 @@ form_sm_packet(ASensorEvent event) {
 	if (c==NULL) return NULL;
 	memset(c, 0, sizeof(ze_sm_packet_t));
 
-	c->sensor = ASENSOR_TYPE_ACCELEROMETER;
 	c->rtpts = 0;
 	c->ntpts = event.timestamp;
 
 	if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
+		c->sensor = ASENSOR_TYPE_ACCELEROMETER;
 		ze_accel_vector_t *temp = malloc(sizeof(ze_accel_vector_t));
 		if (temp==NULL) return NULL;
 		memset(temp, 0, sizeof(ze_accel_vector_t));
@@ -815,9 +814,6 @@ form_sm_packet(ASensorEvent event) {
 		sprintf(temp->z, "%e", event.acceleration.z);
 		c->data = temp;
 		c->length = sizeof(ze_accel_vector_t);
-	}
-	else {
-		//...
 	}
 
 	return c;

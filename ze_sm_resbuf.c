@@ -11,13 +11,13 @@
  */
 
 #include "ze_log.h"
-#include "ze_coap_reqbuf.h"
+#include "ze_sm_resbuf.h"
 #include "ze_coap_server_core.h"
 #include "ze_streaming_manager.h"
 
-ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
+ze_sm_response_t get_coap_buf_item(ze_sm_response_buf_t *buf) {
 
-	ze_coap_request_t temp;
+	ze_sm_response_t temp;
 
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter <= 0) { //empty (shall never < 0 anyway)
@@ -27,7 +27,7 @@ ze_coap_request_t get_coap_buf_item(ze_coap_request_buf_t *buf) {
 			 */
 			/* Signal that the buffer is empty by returning
 			 * an invalid request */
-			temp.rtype = COAP_SMREQ_INVALID;
+			temp.rtype = INVALID_COMMAND;
 		}
 		else {
 			temp = buf->rbuf[buf->gethere];
@@ -70,8 +70,8 @@ int get_rtp_buf_item(JNIEnv* env, jobject thiz, jobject command) {
 	// * sort of command.type == temp.rtype
 }*/
 
-int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
-		coap_ticket_t ticket, int conf, /*ze_payload_t *pyl*/unsigned char *pk) {
+int put_coap_buf_item(ze_sm_response_buf_t *buf, int rtype,
+		ticket_t ticket, int conf, /*ze_payload_t *pyl*/unsigned char *pk) {
 
 	int timeout = 0;
 
@@ -117,12 +117,11 @@ int put_coap_buf_item(ze_coap_request_buf_t *buf, int rtype,
 	return timeout;
 }
 
-ze_coap_request_buf_t* init_coap_buf() {
+ze_sm_response_buf_t* init_coap_buf() {
 
-	ze_coap_request_buf_t *buf = malloc(sizeof(ze_coap_request_buf_t));
+	ze_sm_response_buf_t *buf = malloc(sizeof(ze_sm_response_buf_t));
 	if (buf == NULL) return NULL;
-
-	memset(buf->rbuf, 0, COAP_RBUF_SIZE*sizeof(ze_coap_request_t));
+	memset(buf->rbuf, 0, COAP_RBUF_SIZE*sizeof(ze_sm_response_t));
 
 	/* What happens if a thread tries to initialize a mutex or a cond var
 	 * that has already been initialized? "POSIX explicitly

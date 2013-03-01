@@ -16,6 +16,7 @@
 #include "net.h"
 #include "subscribe.h"
 #include "resource.h"
+#include "ze_timing.h"
 
 void *
 ze_coap_server_core_thread(void *args) {
@@ -25,7 +26,7 @@ ze_coap_server_core_thread(void *args) {
 	struct coap_thread_args* ar = ((struct coap_thread_args*)(args));
 	coap_context_t *cctx = ar->cctx;
 	ze_sm_request_buf_t *smreqbuf = ar->smreqbuf;
-	ze_coap_request_buf_t *notbuf = ar->notbuf;
+	ze_sm_response_buf_t *notbuf = ar->notbuf;
 
 	/* Not elegant but handy:
 	 * Since most of the already made library function calls take
@@ -50,7 +51,7 @@ ze_coap_server_core_thread(void *args) {
 	fd_set readfds;
 	struct timeval tv, *timeout;
 
-	ze_coap_request_t req;
+	ze_sm_response_t req;
 	coap_pdu_t *pdu = NULL;
 	coap_async_state_t *asy = NULL, *tmp;
 	//coap_tid_t asyt;
@@ -60,10 +61,9 @@ ze_coap_server_core_thread(void *args) {
 	int result;
 	int smcount = 0;
 
-	/*
-	unsigned char *pyl = NULL;
-	int pyllength = 0;
-	*/
+	coap_registration_t *reg;
+
+	ze_payload_t *pyl = NULL, *srpyl = NULL;
 
 
 	while (!globalexit) { /*---------------------------------------------*/
@@ -136,46 +136,40 @@ ze_coap_server_core_thread(void *args) {
 	/* Start by fetching an SM request and dispatch it
 	 */
 	req = get_coap_buf_item(notbuf);
+	ze_sm_packet_t *reqpacket = (ze_sm_packet_t *)req.pk;
 	/* Recall that the getter does not do any checkout not free
 	 * Under this model only the CoAP server manages the ticket
 	 */
 
-	if (req.rtype == COAP_STREAM_STOPPED) {
+	if (req.rtype == STREAM_STOPPED) {
 		LOGI("CS Got a STREAM STOPPED command");
+
+		reg = (coap_registration_t *)(req.ticket);
+
 		/* We're sure that no other notification will arrive
 		 * with that ticket. Release it on behalf of the streaming
 		 * manager. If there is no ongoing transaction, the registration
 		 * associated to it will be destroyed.
 		 */
-		res = coap_get_resource_from_key(cctx, req.ticket.reg->reskey);
-		coap_registration_release(res, req.ticket.reg);
+		res = coap_get_resource_from_key(cctx, reg->reskey);
+		coap_registration_release(res, reg);
 	}
-	else if (req.rtype == COAP_SEND_ASYNCH) {
+	else if (req.rtype == ONESHOT) {
 		LOGI("CS Got a SEND ASYNCH command");
 		/* Lookup in the async register using the ticket tid..
 		 * it shall find it..
 		 */
-		asy = coap_find_async(cctx, req.ticket.tid);
+		coap_tid_t tid = (coap_tid_t)(req.ticket);
+		asy = coap_find_async(cctx, tid);
 		if (asy != NULL) {
 
-			/* Build payload. */
-			/*pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
-			pyl = malloc(pyllength);
-			if (pyl == NULL) {
-				LOGW("CS cannot malloc for payload in server core thread");
-				exit(1);
-			}
-			memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
-			memcpy(pyl+sizeof(int64_t), &(req.pyl->length), sizeof(int));
-			memcpy(pyl+sizeof(int64_t)+sizeof(int), req.pyl->data, req.pyl->length);*/
-
-			pyl = form_data_payload(req.pk);
+			pyl = form_data_payload(reqpacket);
 
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
 			coap_add_option(pdu, COAP_OPTION_TOKEN, asy->tokenlen, asy->token);
-			coap_add_data(pdu, req.pyl->length, req.pyl->data);
+			coap_add_data(pdu, pyl->length, pyl->data);
 
 			/* Send message. */
 			if (req.conf == COAP_MESSAGE_CON) {
@@ -199,8 +193,10 @@ ze_coap_server_core_thread(void *args) {
 		free(req.pyl->data);
 		free(req.pyl);
 	}
-	else if (req.rtype == COAP_SEND_NOTIF) {
+	else if (req.rtype == STREAM_NOTIFICATION) {
 		LOGI("CS Got a SEND NOTIF command");
+
+		reg = (coap_registration_t *)(req.ticket);
 
 		/* Here I have to check if the registration
 		 * that corresponds to the ticket is still
@@ -217,46 +213,34 @@ ze_coap_server_core_thread(void *args) {
 		 * STREAM STOPPED confirmation, just forget
 		 * about it.
 		 */
-		if (req.ticket.reg->fail_cnt <= COAP_OBS_MAX_FAIL) {
+		if (reg->fail_cnt <= COAP_OBS_MAX_FAIL) {
 
-			/* Transfer our payload structure into a series of bytes.
-			 * Sending only the timestamp and the sensor event for the
-			 * moment.
-			 * TODO: optimize it so that we don't create another copy
-			 * and it need not malloc every loop
-			 * could be passed already in this way by the request manager..
-			 * This is called CODEC !!!
-			 */
-			/*pyllength = sizeof(int64_t)+sizeof(int)+(req.pyl->length);
-			pyl = malloc(pyllength);
-			if (pyl == NULL) {
-				LOGW("CS cannot malloc for payload in server core thread");
-				exit(1);
-			}
-			memcpy(pyl, &(req.pyl->wts), sizeof(int64_t));
-			memcpy(pyl+sizeof(int64_t), &(req.pyl->length), sizeof(int));
-			memcpy(pyl+sizeof(int64_t)+sizeof(int), req.pyl->data, req.pyl->length);*/
+			/* Update timing info. */
+			reg->ntptwin = reqpacket->ntpts;
+			reg->rtptwin = reqpacket->rtpts;
+
+			pyl = form_data_payload(reqpacket);
 
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
-			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(req.ticket.reg->notcnt));
-			coap_add_option(pdu, COAP_OPTION_TOKEN, req.ticket.reg->token_length, req.ticket.reg->token);
+			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(reg->notcnt));
+			coap_add_option(pdu, COAP_OPTION_TOKEN, reg->token_length, reg->token);
 			coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
-			coap_add_data(pdu, req.pyl->length, req.pyl->data);
+			coap_add_data(pdu, pyl->length, pyl->data);
 
-			if (req.ticket.reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
+			int sent = 1;
+			if (reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
 				/* Either the max NON have been reached or
 				 * we explicitly requested a CON.
 				 * Send a CON and clean the NON counter
 				 */
 				LOGI("CS Sending confirmable notification");
 				pdu->hdr->type = COAP_MESSAGE_CON;
-				coap_notify_confirmed(cctx, &(req.ticket.reg->subscriber), pdu,
-						coap_registration_checkout(req.ticket.reg) );
+				coap_notify_confirmed(cctx, &(reg->subscriber), pdu,
+						coap_registration_checkout(reg) );
 
-				req.ticket.reg->notcnt++;
-				req.ticket.reg->non_cnt = 0;
+				reg->non_cnt = 0;
 			}
 			else if (req.conf == COAP_MESSAGE_NON) {
 				/* send a non-confirmable
@@ -264,16 +248,34 @@ ze_coap_server_core_thread(void *args) {
 				 * no need to keep the transaction state
 				 */
 				LOGI("CS Sending non confirmable notification");
-				coap_send(cctx, &(req.ticket.reg->subscriber), pdu);
+				coap_send(cctx, &(reg->subscriber), pdu);
 
-				req.ticket.reg->notcnt++;
-				req.ticket.reg->non_cnt++;
+				reg->non_cnt++;
 
-				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
+				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE); //TODO: Might be useless..
 				//free(pyl);
 			}
-			else LOGW("CS Could not understand message type.");
+			else {
+				sent = 0;
+				LOGW("CS Could not understand message type.");
+			}
 
+			if(sent) {
+				reg->notcnt++; //notcnt and packcount are not the same!, notcnt has a random start!
+				reg->packcount++;
+				reg->octcount+=pyl->length; //following RTP, only payload octects accounted
+
+				/* May be time to send an RTCP packet..
+				 * either bw threshold reached or first notification
+				 * (need to send an RTCP asap) */
+				if ( reg->octcount > (reg->last_sr_octcount + RTCP_SR_BANDWIDTH_THRESHOLD)
+						|| reg->packcount==1) {
+					srpyl = form_sr_payload(reg);
+					reg->last_sr_octcount = reg->octcount;
+					reg->last_sr_packcount = reg->packcount;
+					coap_send(cctx, &(reg->subscriber), pdu);
+				}
+			}
 
 			/* Even if pyl is a pointer to char, it does not
 			 * free only one byte. The heap manager stores
@@ -329,25 +331,6 @@ ze_coap_server_core_thread(void *args) {
 && (!token || (token->length == s->token_length
 	       && memcmp(token->s, s->token, token->length) == 0)) */
 
-typedef struct {
-	int sensor;
-	long ntpts;
-	int rtpts;
-	unsigned char *data;
-	int length;
-} ze_sm_packet_t;
-
-typedef struct {
-	ze_payload_header_t phdr;	//0-3
-	ze_paydata_header_t pdhdr;	//4-15
-	ze_accel_vector_t	vector;	//16-75
-} ze_accel_paydata_t;			//tot 76 bytes
-
-typedef struct {
-	char x[CHLEN];				//0-19
-	char y[CHLEN];				//20-39
-	char z[CHLEN];				//40-59
-}
 
 ze_payload_t *
 form_data_payload(ze_sm_packet_t *packet) {
@@ -357,24 +340,73 @@ form_data_payload(ze_sm_packet_t *packet) {
 	c->data = 0;
 	c->length = 0;
 
-	//NONO I DON'T LIKE AT ALL!
-	if (packet->sensor == ASENSOR_TYPE_ACCELEROMETER) {
-		ze_accel_paydata_t *temp = malloc(sizeof(ze_accel_paydata_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_accel_paydata_t));
-		temp->phdr.packet_type = htonl(DATAPOINT);
-		temp->pdhdr.sensor_type = htonl(ASENSOR_TYPE_ACCELEROMETER);
-		//temp->pdhdr.sn = 0;
-		temp->pdhdr.ts = htonl(packet->rtpts);
-		/* sprintf(temp->vector->x, "%e", packet->data.acceleration.x);
-		sprintf(temp->vector->y, "%e", event.acceleration.y);
-		sprintf(temp->vector->z, "%e", event.acceleration.z); */
-		memcpy(&temp->vector, packet->data, sizeof(ze_accel_vector_t));
-		c->data = temp;
-		c->length = sizeof(ze_accel_paydata_t);
-	}
-	else {
+	/* Create a memory chunk able to contain the payload
+	 * headers and the measurement vector brought in
+	 * packet->data;
+	 */
+	int totlength = sizeof(ze_payload_header_t)+sizeof(ze_paydata_header_t)+packet->length;
+	c->data = malloc(totlength);
+	if(c->data == NULL) return NULL;
+	c->length = totlength;
+	memset(c->data, 0, totlength);
 
-	}
+	/* Proceed by shifts and fill the memory chunk according
+	 * to the pseudo-struct:
+	 * {
+	 * 	ze_payload_header_t phdr;	//0-3
+	 *	ze_paydata_header_t pdhdr;	//4-11
+	 *	unsigned char[packet->length]; //12-12+length
+	 * }
+	 */
+	ze_payload_header_t *hdr = (ze_payload_header_t*)(c->data);
+	hdr->packet_type = htonl(DATAPOINT);
+
+	ze_paydata_header_t *dhdr = (ze_paydata_header_t*)(hdr + sizeof(ze_payload_header_t));
+	dhdr->sensor_type = htonl(packet->sensor);
+	dhdr->ts = htonl(packet->rtpts);
+
+	unsigned char *d = (unsigned char *)(dhdr + sizeof(ze_paydata_header_t));
+	memcpy(d, packet->data, packet->length);
+
 	return c;
+}
+
+typedef struct {
+	long ntp;
+	int ts;
+	int pc;
+	int oc;
+} ze_payload_sr_t;
+
+ze_payload_t *
+form_sr_payload(coap_registration_t *reg) {
+
+	ze_payload_t *c = malloc(sizeof(ze_payload_t));
+	if (c==NULL) return NULL;
+	c->data = 0;
+	c->length = 0;
+
+	int totlength = sizeof(ze_payload_header_t)+sizeof(ze_payload_sr_t);
+	c->data = malloc(totlength);
+	if(c->data == NULL) return NULL;
+	c->length = totlength;
+	memset(c->data, 0, totlength);
+
+	ze_payload_header_t *hdr = (ze_payload_header_t*)(c->data);
+	hdr->packet_type = htonl(SENDREPORT);
+
+	ze_payload_sr_t *sr = (ze_payload_sr_t*)(hdr + sizeof(ze_payload_header_t));
+	sr->ntp = get_ntp();
+	sr->ts = htonl(reg->rtptwin+(RTP_TSCLOCK_FREQ/1000000000LL)*(sr->ntp - reg->ntptwin));
+	sr->oc = htonl(reg->octcount);
+	sr->pc = htonl(reg->packcount);
+
+	return c;
+}
+
+long get_ntp() {
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	long ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
+	return ntp;
 }

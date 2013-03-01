@@ -19,7 +19,7 @@
 #include "net.h"
 #include "address.h"
 #include "asynchronous.h"
-#include "ze_coap_reqbuf.h"
+#include "ze_sm_resbuf.h"
 #include "ze_sm_reqbuf.h"
 #include "ze_log.h"
 
@@ -54,7 +54,6 @@ enum {
 #define ZESENSE_SENSOR_TYPE_PRESSURE		6
 #define ZESENSE_SENSOR_TYPE_LOCATION		14
 
-
 /* Error conditions */
 #define SM_ERROR			(-1)
 #define SM_URI_REPLACED 	1
@@ -71,10 +70,6 @@ enum {
 #define SM_REQ_ONESHOT		30
 #define SM_REQ_INVALID		(-1)
 
-/* Synchronization settings */
-#define RTP_CLOCK_FREQ		200
-#define RTP_TS_START		450	//debug value
-
 /* Sensor settings */
 #define DEFAULT_FREQ		10
 #define ACCEL_MAX_FREQ		100
@@ -88,19 +83,41 @@ enum {
 #define ZE_NUMSENSORS		(14+1) /* +1 in order to use sensor types
 									* as array indexes */
 
+/* Request codes for the lower layer. */
+#define STREAM_NOTIFICATION			50
+#define ONESHOT						60
+#define STREAM_STOPPED				70
+#define INVALID_COMMAND				40
+
 /* Utilities */
 #define TRUE 	0
 #define FALSE 	1
+
+/* Consumers of the ticket will be able to interpret it
+ * (cast it) to the appropriate type, either an integer
+ * valued identifier or a pointer to a specific type.
+ */
+typedef int ticket_t;
+
+//typedef union coap_ticket_u ticket_t;
+/*
+union coap_ticket_u {
+	// Ticket corresponding to the underlying registration
+	coap_registration_t *reg;
+
+	// Ticket corresponding to the underlying asynchronous request.
+	coap_tid_t tid;
+};
+*/
+
 
 struct stream_context_t;
 
 typedef struct ze_oneshot_t {
 	struct ze_oneshot_t *next;
-
 	/* Ticket that identifies the oneshot request
-	 * when interacting with the CoAP server.
-	 */
-	coap_ticket_t one;
+	 * when interacting with the CoAP server. */
+	ticket_t one;
 } ze_oneshot_t;
 
 typedef struct ze_stream_t {
@@ -109,7 +126,7 @@ typedef struct ze_stream_t {
 	/* Ticket that identifies the stream
 	 * when interacting with the CoAP server.
 	 */
-	coap_ticket_t reg;
+	ticket_t reg;
 
 	/* In some way this is the lookup key,
 	 * no two elements with the same dest will be present in the list
@@ -118,13 +135,12 @@ typedef struct ze_stream_t {
 	 */
 	//coap_address_t dest;
 
-	/* Client specified frequency */
+	/* Client specified stream frequency */
 	int freq;
 
 	/* Streaming Manager local status variables. */
 	int last_wts;	//Last wallclock timestamp
 	int last_rtpts;	//Last RTP timestamp
-	int last_sn;
 	int freq_div;	//Frequency divider
 } ze_stream_t;
 
@@ -215,7 +231,7 @@ typedef struct {
 	long ntpts;
 	int rtpts;
 	unsigned char *data;
-	int length;
+	int length; //length of the *data field
 } ze_sm_packet_t;
 
 /*
@@ -260,10 +276,10 @@ int sm_bind_source(stream_context_t *mngr, int sensor_id, str uri);
 //int sm_bind_server(stream_context_t *mngr, coap_context_t *server);
 
 
-ze_stream_t *sm_new_stream(coap_ticket_t reg, int freq);
+ze_stream_t *sm_new_stream(ticket_t reg, int freq);
 
 ze_stream_t *
-sm_find_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg);
+sm_find_stream(stream_context_t *mngr, int sensor_id, ticket_t reg);
 
 /**
  * Starts a stream of notifications of samples
@@ -292,7 +308,7 @@ sm_find_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg);
  * replaced an existing one, @c SM_OUT_RANGE if @p sensor_id is out of bound,
  * @c SM_ERROR on failure
  */
-ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg, int freq);
+ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id, ticket_t reg, int freq);
 
 /**
  * Stops the stream of notifications from @p sensor_id
@@ -306,7 +322,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id, coap_ticket_
  * (e.g. the stream does not exist)
  * @c SM_OUT_RANGE if @p sensor_id is out of bound
  */
-int sm_stop_stream(stream_context_t *mngr, int sensor_id, coap_ticket_t reg);
+int sm_stop_stream(stream_context_t *mngr, int sensor_id, ticket_t reg);
 
 /**
  * Checks if a stream from @p sensor_id to destination @p dest
@@ -366,7 +382,7 @@ sm_new_oneshot(stream_context_t *mngr, int sensor_id, coap_address_t dest,
 
 
 ze_oneshot_t *
-sm_new_oneshot(coap_ticket_t one);
+sm_new_oneshot(ticket_t one);
 
 stream_context_t *
 get_streaming_manager(/*coap_context_t  *cctx*/);

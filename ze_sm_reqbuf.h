@@ -19,14 +19,13 @@
 /* Buffer size */
 #define SM_RBUF_SIZE		20
 
-
 typedef struct ze_sm_request_t {
 	/* Request type */
 	int rtype;
 
 	int sensor;
 
-	coap_ticket_t ticket;
+	ticket_t ticket;
 
 	/* Request parameters, NULL when they do not apply */
 	int freq;
@@ -88,7 +87,7 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf);
  * @return Zero on success
  */
 int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor, /*coap_address_t dest,*/
-		coap_ticket_t reg, int freq/*, int tknlen, unsigned char *tkn*/);
+		ticket_t reg, int freq/*, int tknlen, unsigned char *tkn*/);
 
 ze_sm_request_buf_t* init_sm_buf();
 

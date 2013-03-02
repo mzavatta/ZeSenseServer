@@ -14,6 +14,15 @@
 #include "utlist.h"
 #include "ze_coap_payload.h"
 #include "ze_timing.h"
+#include "ze_sm_resbuf.h"
+#include "ze_sm_reqbuf.h"
+
+typedef struct sm_req_internal_t {
+	struct sm_req_internal_t *next;
+	ze_sm_request_t req;
+} sm_req_internal_t;
+
+ze_sm_packet_t* form_sm_packet(ASensorEvent event);
 
 stream_context_t *
 get_streaming_manager(/*coap_context_t  *cctx*/) {
@@ -48,8 +57,7 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 		ticket_t ticket, int conf, /*ze_payload_t *pyl*/ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
-ze_payload_t *
-form_data_payload(ASensorEvent event);
+
 
 void *
 ze_coap_streaming_thread(void* args) {
@@ -114,7 +122,7 @@ ze_coap_streaming_thread(void* args) {
 
 	ze_payload_t *pyl = NULL;
 
-	ze_sm_packet_t pk;
+	ze_sm_packet_t *pk;
 
 	int rto, rtc, max_age;
 

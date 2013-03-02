@@ -15,6 +15,7 @@
 
 #include <pthread.h>
 #include "asynchronous.h"
+#include "ze_ticket.h"
 
 /* Buffer size */
 #define SM_RBUF_SIZE		20

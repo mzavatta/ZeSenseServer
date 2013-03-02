@@ -17,6 +17,11 @@
 #include "subscribe.h"
 #include "resource.h"
 #include "ze_timing.h"
+#include "ze_coap_payload.h"
+
+ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
+ze_payload_t* form_sr_payload(coap_registration_t *reg);
+long get_ntp();
 
 void *
 ze_coap_server_core_thread(void *args) {
@@ -190,8 +195,8 @@ ze_coap_server_core_thread(void *args) {
 		}
 		else LOGW("CS Got oneshot sample but no asynch request matches the ticket");
 
-		free(req.pyl->data);
-		free(req.pyl);
+		free(pyl->data);
+		free(pyl);
 	}
 	else if (req.rtype == STREAM_NOTIFICATION) {
 		LOGI("CS Got a SEND NOTIF command");
@@ -295,10 +300,10 @@ ze_coap_server_core_thread(void *args) {
 		/* These are different from pyl because we do a copy,
 		 * so free them in any case.
 		 */
-		free(req.pyl->data);
-		free(req.pyl);
+		free(pyl->data);
+		free(pyl);
 	}
-	else if (req.rtype == COAP_SMREQ_INVALID) {
+	else if (req.rtype == INVALID_COMMAND) {
 		/* Buffer's empty, do not loop any more times,
 		 * better to go on doing something else.
 		 */
@@ -370,13 +375,6 @@ form_data_payload(ze_sm_packet_t *packet) {
 
 	return c;
 }
-
-typedef struct {
-	long ntp;
-	int ts;
-	int pc;
-	int oc;
-} ze_payload_sr_t;
 
 ze_payload_t *
 form_sr_payload(coap_registration_t *reg) {

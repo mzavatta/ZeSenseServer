@@ -19,9 +19,8 @@
 #include "net.h"
 #include "address.h"
 #include "asynchronous.h"
-#include "ze_sm_resbuf.h"
-#include "ze_sm_reqbuf.h"
 #include "ze_log.h"
+#include "ze_ticket.h"
 
 /*
  * <source>/hardware/libhardware/include/hardware/sensors.h
@@ -92,12 +91,6 @@ enum {
 /* Utilities */
 #define TRUE 	0
 #define FALSE 	1
-
-/* Consumers of the ticket will be able to interpret it
- * (cast it) to the appropriate type, either an integer
- * valued identifier or a pointer to a specific type.
- */
-typedef int ticket_t;
 
 //typedef union coap_ticket_u ticket_t;
 /*
@@ -226,6 +219,7 @@ typedef struct stream_context_t {
 	jclass ZeGPSManager; //the Java class object
 } stream_context_t;
 
+
 typedef struct {
 	int sensor;
 	long ntpts;
@@ -245,10 +239,6 @@ if (sensor<0 || sensor>=ZE_NUMSENSORS) {
 /*
  *
  */
-typedef struct sm_req_internal_t {
-	struct sm_req_internal_t *next;
-	ze_sm_request_t req;
-} sm_req_internal_t;
 
 void *
 ze_coap_streaming_thread(void* args);

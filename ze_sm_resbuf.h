@@ -17,6 +17,8 @@
 #include <errno.h>
 #include "ze_coap_payload.h"
 #include "asynchronous.h"
+#include "ze_ticket.h"
+
 
 /* Buffer size */
 #define COAP_RBUF_SIZE		20

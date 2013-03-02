@@ -30,13 +30,20 @@
 #include <errno.h>
 #include <signal.h>
 
-#include "config.h"
-#include "net.h"
+#include <jni.h>
+#include "ze_streaming_manager.h"
 #include "ze_sm_resbuf.h"
 #include "ze_sm_reqbuf.h"
-#include "ze_streaming_manager.h"
-//#include "coap.h"
-#include <jni.h>
+
+/* CoAP or RTP server? */
+#define COAP_SERVER 1
+
+#ifdef COAP_SERVER
+#include "config.h"
+#include "net.h"
+#else
+#include "rtp_net.h"
+#endif
 
 /* Server endpoint coordinates. */
 #define SERVER_IP "192.168.43.1"	//Wifi hotspot interface
@@ -52,11 +59,20 @@ struct sm_thread_args {
 	JavaVM *jvm;
 	jclass ZeGPSManager;
 };
+
+#ifdef COAP_SERVER
 struct coap_thread_args {
 	coap_context_t  *cctx;
 	ze_sm_request_buf_t *smreqbuf;
 	ze_sm_response_buf_t *notbuf;
 };
+#else
+struct rtp_thread_args {
+	rtp_context_t  *rctx;
+	ze_sm_request_buf_t *smreqbuf;
+	ze_sm_response_buf_t *notbuf;
+};
+#endif
 
 /* Global quit flag.
  * No use of synch primitives as an integer
@@ -78,7 +94,7 @@ ze_sm_response_buf_t *notbufg;
 //Java_eu_tb_zesense_ZeJNIHub_ze_1coap_1server_1root(JNIEnv* env, jobject thiz);
 
 int
-ze_coap_server_root(JNIEnv* env, jobject thiz, jobject actx);
+ze_server_root(JNIEnv* env, jobject thiz, jobject actx);
 
 coap_context_t *
 get_context(const char *node, const char *port);

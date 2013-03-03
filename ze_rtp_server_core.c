@@ -54,7 +54,7 @@
 int interpret_sdes(unsigned char *chunk, int length);
 int interpret_rr(unsigned char *chunk, int length);
 int rtp_read_dispatch(rtp_context_t *rctx);
-long get_ntp();
+uint64_t get_ntp();
 
 
 void *
@@ -225,7 +225,7 @@ ze_rtp_server_core_thread(void *args) {
 						 * previous data packet, because some time will have elapsed since the
 						 * data in that packet was sampled. (Perkins 2003)
 						 */
-						long ntpdiff = srtemp->ntpts - str->ntptwin;
+						uint64_t ntpdiff = srtemp->ntpts - str->ntptwin;
 						float freqdiv = (float)RTP_TSCLOCK_FREQ/1000000000LL;
 						//TODO, check the rounding that is performed
 						srtemp->rtpts = str->rtptwin +
@@ -273,10 +273,10 @@ ze_rtp_server_core_thread(void *args) {
 
 }
 
-long get_ntp() {
+uint64_t get_ntp() {
 	struct timespec t;
 	clock_gettime(CLOCK_MONOTONIC, &t);
-	long ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
+	uint64_t ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
 	return ntp;
 }
 

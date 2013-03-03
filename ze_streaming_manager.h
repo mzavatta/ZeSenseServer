@@ -132,7 +132,7 @@ typedef struct ze_stream_t {
 	int freq;
 
 	/* Streaming Manager local status variables. */
-	int last_wts;	//Last wallclock timestamp
+	uint64_t last_wts;	//Last wallclock timestamp
 	int last_rtpts;	//Last RTP timestamp
 	int freq_div;	//Frequency divider
 } ze_stream_t;
@@ -222,7 +222,7 @@ typedef struct stream_context_t {
 
 typedef struct {
 	int sensor;
-	long ntpts;
+	uint64_t ntpts;
 	int rtpts;
 	unsigned char *data;
 	int length; //length of the *data field
@@ -266,7 +266,7 @@ int sm_bind_source(stream_context_t *mngr, int sensor_id, str uri);
 //int sm_bind_server(stream_context_t *mngr, coap_context_t *server);
 
 
-ze_stream_t *sm_new_stream(ticket_t reg, int freq);
+ze_stream_t *sm_new_stream();
 
 ze_stream_t *
 sm_find_stream(stream_context_t *mngr, int sensor_id, ticket_t reg);

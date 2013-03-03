@@ -44,6 +44,7 @@ ze_coap_init_accel() {
 
 	r = coap_resource_init((unsigned char *)"accel", 5, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, accel_GET_handler);
+	coap_register_handler(r, COAP_REQUEST_POST, accel_POST_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
@@ -67,7 +68,20 @@ accel_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response) {
 
+
+	LOGI("Recognized accelerometer GET request, entered handler!");
+
 	generic_GET_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_ACCELEROMETER);
+
+}
+
+void
+accel_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	generic_POST_handler(context, resource, peer, request, token, response,
 			ASENSOR_TYPE_ACCELEROMETER);
 
 }
@@ -112,6 +126,8 @@ location_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response) {
 
+	LOGI("Recognized location GET request, entered handler!");
+
 	generic_GET_handler(context, resource, peer, request, token, response,
 			ZESENSE_SENSOR_TYPE_LOCATION);
 
@@ -130,8 +146,6 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_pdu_t *response,
 	      int sensor) {
 
-	LOGI("Recognized accelerometer GET request, entered handler!");
-
 	coap_opt_iterator_t opt_iter;
 	coap_opt_t *obopt;
 	coap_registration_t *reg;
@@ -142,7 +156,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	 * interpret parameters in the request query
 	 * string
 	 */
-	int freq = 1;
+	int freq = 5;
 
 	obopt = coap_check_option(request, COAP_OPTION_SUBSCRIPTION, &opt_iter);
 	if (obopt != NULL) { //There is an observe option
@@ -239,6 +253,15 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 
 	return;
 }
+
+void
+generic_POST_handler (coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response,
+	      int sensor) {
+	LOGI("Got POST!!");
+}
+
 
 void
 generic_on_unregister(coap_context_t *ctx, coap_registration_t *reg,

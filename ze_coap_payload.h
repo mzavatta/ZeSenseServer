@@ -34,25 +34,39 @@ typedef struct ze_payload_t {
 
 /* Common to all payloads in our solution,
  * distinguishes the payload structures. */
+/*
 typedef struct {
 	int packet_type;
+} ze_payload_header_t;*/
+typedef struct {
+	unsigned char packet_type;
+	unsigned char sensor_type;
+	short length;
 } ze_payload_header_t;
 
+
 /* Common to all data packets in our application. */
+/*
 typedef struct {
 	int sensor_type; //catalog to distinguish semantics and length of the data fiels
 	int ts; //timestamp
-} ze_paydata_header_t;
+} ze_paydata_header_t;*/
 
 /* Sender report structure. It is independent on the data carried
  * and therefore there's no need to include sensor specific
  * information. */
+/* FOUND WHEN DEBUGGING, IT STRANGELY PADS THIS STRUCTURE TO BE
+ * 24 BYTES LONG INSTEAD OF 20. COMPILER STRUCTURE PACKING DIRECTIVES
+ * DO MAKE SOME MESS (REPORTED ON SOME SMARTPHONE HW PLATFORMS).
+ * ONLY WAY TO malloc(ZE_PAYLOAD_SR_LENGTH)
 typedef struct {
-	long ntp;
+	uint64_t ntp;
 	int ts;
 	int pc;
 	int oc;
-} ze_payload_sr_t;	 //tot 20 bytes
+} ze_payload_sr_t;	 //tot 20 bytes*/
+#define ZE_PAYLOAD_SR_LENGTH 20
+
 
 typedef struct {
 	char x[CHARLEN];				//0-19

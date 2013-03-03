@@ -191,7 +191,7 @@ ze_coap_streaming_thread(void* args) {
 		}
 		else if (sm_req.rtype == SM_REQ_ONESHOT) {
 			LOGI("SM we got a ONESHOT request");
-			if (mngr->sensors[sm_req.sensor].is_active != NULL) {
+			if (mngr->sensors[sm_req.sensor].is_active != 0) {
 				/* Sensor is active, suppose cache is fresh
 				 * and serve the oneshot request immediately. */
 
@@ -251,6 +251,8 @@ ze_coap_streaming_thread(void* args) {
 						event.acceleration.z);
 			}
 
+			LOGW("Frequency of this sensor is:%d", mngr->sensors[event.type].freq);
+
             /* Update cache in any case. */
             mngr->sensors[event.type].event_cache = event;
 
@@ -287,9 +289,9 @@ ze_coap_streaming_thread(void* args) {
 
 			/* Done with the oneshots,
 			 * now this sample might also belong to some stream.
-			 * Here we have to add the timestamp and sequence number
-			 * to the payload, casting the payload depending on the
-			 * sensor type!
+			 * Here we have to add the timestamp.
+			 * The sequence number is at the "packet" layer,
+			 * not at the sample layer..
 			 */
 			if (mngr->sensors[event.type].streams != NULL) {
 
@@ -297,25 +299,17 @@ ze_coap_streaming_thread(void* args) {
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
 
-					/* Interesting not to have a cast but since all the headers
-					 * for data packets are the same.. have a same "fake"
-					 * structure.. */
-					/* Allocate a new payload for each notification sent. */
-					/*
-					pyl = form_data_payload(event);
-					if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
-						ze_accel_paydata_t *pa = (ze_accel_paydata_t*)pyl->data;
-						//pa->pdhdr.sn = htonl(stream->last_sn + 1);
-						pa->pdhdr.ts = htonl(4567); //TODO
-					}*/
 					pk = form_sm_packet(event);
-					pk->rtpts = 4567; //TODO
+
+					pk->rtpts = stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq);
+					stream->last_rtpts = pk->rtpts;
+					stream->last_wts = event.timestamp;
 
 					put_coap_helper(notbuf, STREAM_NOTIFICATION,
 							stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 
-					//stream->last_sn++; moved to the coap level (packet dependent,
-					//not sensor dependent)
+					//stream->last_sn++; moved to the coap level (packet based,
+					//not sample based)
 
 					stream = stream->next;
 				}
@@ -474,12 +468,13 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 
 	ze_stream_t *sub, *newstream;
 
-	newstream = sm_new_stream(reg, freq);
+	newstream = sm_new_stream();
 	if (newstream == NULL) return NULL;
-	/* TODO assign proper values to newstream:
-	 * last_wts
-	 * randomize rtpts since its first assignment
-	 * frequency divider to be considered based on the current sampling frequency
+	newstream->reg = reg;
+	newstream->freq = freq;
+	newstream->last_rtpts = RTP_TS_START;
+	newstream->last_wts = 0;
+	/* TODO randomize rtpts since its first assignment
 	 */
 
 	//if ( mngr->sensors[sensor_id].android_handle == NULL ) {
@@ -493,6 +488,8 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 					"are streams active on it");
 
 		android_sensor_activate(mngr, sensor_id, freq);
+
+		mngr->sensors[sensor_id].freq = freq;
 	}
 	/* Sensor is already active.
 	 * Re-evaluate its frequency based on the new request
@@ -512,6 +509,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 		/* TODO
 		 * Do I have to transfer anything to newstream before
 		 * sub gets deleted? Maybe some local status variables.
+		 * Why not just modify the existing stream?
 		 * We'll see when we implement the timestamping..
 		 */
 		LL_DELETE(mngr->sensors[sensor_id].streams, sub);
@@ -606,7 +604,7 @@ ze_stream_t *sm_find_stream(stream_context_t *mngr, int sensor_id, ticket_t reg)
 	return temp;
 }
 
-ze_stream_t *sm_new_stream(ticket_t reg, int freq) {
+ze_stream_t *sm_new_stream() {
 
 	ze_stream_t *new;
 	new = (ze_stream_t *) malloc(sizeof(ze_stream_t));
@@ -617,9 +615,6 @@ ze_stream_t *sm_new_stream(ticket_t reg, int freq) {
 	memset(new, 0, sizeof(ze_stream_t));
 
 	new->next = NULL;
-	new->reg = reg;
-	new->freq = freq;
-	new->last_rtpts = RTP_TS_START;
 
 	return new;
 }

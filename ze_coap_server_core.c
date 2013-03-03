@@ -21,7 +21,11 @@
 
 ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
 ze_payload_t* form_sr_payload(coap_registration_t *reg);
-long get_ntp();
+uint64_t htonll(uint64_t value);
+uint64_t get_ntp();
+
+#define CNAME "android@zesense"
+#define CNAME_LENGTH 15
 
 void *
 ze_coap_server_core_thread(void *args) {
@@ -229,9 +233,10 @@ ze_coap_server_core_thread(void *args) {
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
-			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(reg->notcnt));
+			short st = htons(reg->notcnt);
+			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(st));
 			coap_add_option(pdu, COAP_OPTION_TOKEN, reg->token_length, reg->token);
-			coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
+			//coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
 			coap_add_data(pdu, pyl->length, pyl->data);
 
 			int sent = 1;
@@ -257,7 +262,8 @@ ze_coap_server_core_thread(void *args) {
 
 				reg->non_cnt++;
 
-				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE); //TODO: Might be useless..
+				// TODO free PDU when the send is a non confirmable one!
+				//coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE); //TODO: Might be useless..
 				//free(pyl);
 			}
 			else {
@@ -275,10 +281,25 @@ ze_coap_server_core_thread(void *args) {
 				 * (need to send an RTCP asap) */
 				if ( reg->octcount > (reg->last_sr_octcount + RTCP_SR_BANDWIDTH_THRESHOLD)
 						|| reg->packcount==1) {
+
 					srpyl = form_sr_payload(reg);
+					if (srpyl==NULL)
+						LOGW("form sr payload failed");
+					/* Need to add options in order... */
+					pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
+							coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
+					short st = htons(reg->notcnt);
+					coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short),(unsigned char*)&(st));
+					coap_add_option(pdu, COAP_OPTION_TOKEN, reg->token_length, reg->token);
+					//coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
+					coap_add_data(pdu, srpyl->length, srpyl->data);
+
 					reg->last_sr_octcount = reg->octcount;
 					reg->last_sr_packcount = reg->packcount;
+
+					/* Non confirmable. */
 					coap_send(cctx, &(reg->subscriber), pdu);
+					// TODO free PDU when the send is a non confirmable one!
 				}
 			}
 
@@ -297,7 +318,8 @@ ze_coap_server_core_thread(void *args) {
 		}
 		else LOGI("Not sending notification, registration already invalid.");
 
-		/* These are different from pyl because we do a copy,
+		/* These are different from pyl because the
+		 * coap_add_data(pdu, pyl ..) makes a copy,
 		 * so free them in any case.
 		 */
 		free(pyl->data);
@@ -340,38 +362,37 @@ ze_coap_server_core_thread(void *args) {
 ze_payload_t *
 form_data_payload(ze_sm_packet_t *packet) {
 
+	/*
+	 ze_payload_header_t
+	 timestamp 32bit (int)
+	 packet->data,length
+	 */
+
 	ze_payload_t *c = malloc(sizeof(ze_payload_t));
 	if (c==NULL) return NULL;
-	c->data = 0;
-	c->length = 0;
 
-	/* Create a memory chunk able to contain the payload
-	 * headers and the measurement vector brought in
-	 * packet->data;
-	 */
-	int totlength = sizeof(ze_payload_header_t)+sizeof(ze_paydata_header_t)+packet->length;
+	int totlength = sizeof(ze_payload_header_t)+sizeof(int)+packet->length;
 	c->data = malloc(totlength);
 	if(c->data == NULL) return NULL;
 	c->length = totlength;
 	memset(c->data, 0, totlength);
 
-	/* Proceed by shifts and fill the memory chunk according
-	 * to the pseudo-struct:
-	 * {
-	 * 	ze_payload_header_t phdr;	//0-3
-	 *	ze_paydata_header_t pdhdr;	//4-11
-	 *	unsigned char[packet->length]; //12-12+length
-	 * }
-	 */
-	ze_payload_header_t *hdr = (ze_payload_header_t*)(c->data);
-	hdr->packet_type = htonl(DATAPOINT);
+	int offset = 0;
+	unsigned char *p = c->data;
 
-	ze_paydata_header_t *dhdr = (ze_paydata_header_t*)(hdr + sizeof(ze_payload_header_t));
-	dhdr->sensor_type = htonl(packet->sensor);
-	dhdr->ts = htonl(packet->rtpts);
+	ze_payload_header_t *hdr = (ze_payload_header_t*)(p);
+	hdr->packet_type = DATAPOINT;
+	hdr->sensor_type = packet->sensor;
+	hdr->length = htons(totlength);
 
-	unsigned char *d = (unsigned char *)(dhdr + sizeof(ze_paydata_header_t));
-	memcpy(d, packet->data, packet->length);
+	offset = sizeof(ze_payload_header_t);
+	p = p + offset;
+	int rtpts = htonl(packet->rtpts);
+	memcpy(p, &rtpts, sizeof(int));
+
+	offset = sizeof(int);
+	p = p + offset;
+	memcpy(p, packet->data, packet->length);
 
 	return c;
 }
@@ -379,32 +400,95 @@ form_data_payload(ze_sm_packet_t *packet) {
 ze_payload_t *
 form_sr_payload(coap_registration_t *reg) {
 
+	/* Packet structure:
+	 ze_payload_header_t
+	 ze_payload_sr_t
+	 cname, cnamelength
+	 */
+
 	ze_payload_t *c = malloc(sizeof(ze_payload_t));
 	if (c==NULL) return NULL;
-	c->data = 0;
-	c->length = 0;
 
-	int totlength = sizeof(ze_payload_header_t)+sizeof(ze_payload_sr_t);
+	int totlength = sizeof(ze_payload_header_t)+ZE_PAYLOAD_SR_LENGTH+CNAME_LENGTH;
 	c->data = malloc(totlength);
 	if(c->data == NULL) return NULL;
 	c->length = totlength;
 	memset(c->data, 0, totlength);
 
-	ze_payload_header_t *hdr = (ze_payload_header_t*)(c->data);
-	hdr->packet_type = htonl(SENDREPORT);
+	int offset = 0;
+	unsigned char *p = c->data;
 
-	ze_payload_sr_t *sr = (ze_payload_sr_t*)(hdr + sizeof(ze_payload_header_t));
-	sr->ntp = get_ntp();
-	sr->ts = htonl(reg->rtptwin+(RTP_TSCLOCK_FREQ/1000000000LL)*(sr->ntp - reg->ntptwin));
-	sr->oc = htonl(reg->octcount);
-	sr->pc = htonl(reg->packcount);
+	ze_payload_header_t *hdr = (ze_payload_header_t*)(p);
+	hdr->packet_type = SENDREPORT;
+	hdr->sensor_type = 0;
+	hdr->length = htons(15);
+
+	uint64_t ntpc = get_ntp();
+	uint64_t ntp = htonll(ntpc);
+/*
+	unsigned char *t = &ntp;
+	int i;
+	for (i=0; i < 8; i++) 	LOGW("%c", *(t+i));
+*/
+	int ntpdiff = ntpc - reg->ntptwin;
+	double ratio = (double)RTP_TSCLOCK_FREQ/1000000000LL;
+	int rtpinc = (ratio)*(ntpdiff);
+	LOGI("ntp=%lld, ntptwin=%lld, ntpdiff=%d, rtpinc=%d", ntpc, reg->ntptwin, ntpdiff, rtpinc);
+	int ts = htonl(reg->rtptwin+rtpinc);
+	int oc = htonl(reg->octcount);
+	int pc = htonl(reg->packcount);
+
+	offset = sizeof(ze_payload_header_t);
+	p = p + offset;
+	memcpy(p, &ntp, sizeof(uint64_t));
+
+	offset = sizeof(uint64_t);
+	p = p + offset;
+	memcpy(p, &ts, sizeof(int));
+
+	offset = sizeof(int);
+	p = p + offset;
+	memcpy(p, &pc, sizeof(int));
+
+	offset = sizeof(int);
+	p = p + offset;
+	memcpy(p, &oc, sizeof(int));
+
+	offset = sizeof(int);
+	p = p + offset;
+	memcpy(p, CNAME, CNAME_LENGTH);
 
 	return c;
 }
 
-long get_ntp() {
+uint64_t
+htonll(uint64_t value) {
+	    int i = 1;
+	    char *low = (char*) &i;
+	    // if low contains 1, the system is big-endian
+	    uint64_t vs = value;
+	    uint64_t vd;
+	    unsigned char *s = (unsigned char *)&vs;
+	    unsigned char *d = (unsigned char *)&vd;
+	    if (*low == 1) {
+	    	//big endian, need to turn
+	    	d[0] = s[7];
+	    	d[1] = s[6];
+	    	d[2] = s[5];
+	    	d[3] = s[4];
+	    	d[4] = s[3];
+	    	d[5] = s[2];
+	    	d[6] = s[1];
+	    	d[7] = s[0];
+	    	return vd;
+	    }
+	    else return value;
+}
+
+
+uint64_t get_ntp() {
 	struct timespec t;
 	clock_gettime(CLOCK_MONOTONIC, &t);
-	long ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
+	uint64_t ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
 	return ntp;
 }

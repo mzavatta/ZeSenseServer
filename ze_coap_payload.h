@@ -80,6 +80,10 @@ typedef struct {
 	char alt[CHARLEN];
 } ze_loc_vector_t;			//tot 60 bytes
 
+typedef struct {
+	char distance[CHARLEN]; //tot 20 bytes
+} ze_prox_vector_t;
+
 /* One struct for each sensor data because the transported
  * values are different: some are 2, 3 axis, some transport
  * integers and others transport floats etc..

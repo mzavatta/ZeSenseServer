@@ -16,6 +16,7 @@
 #include "ze_timing.h"
 #include "ze_sm_resbuf.h"
 #include "ze_sm_reqbuf.h"
+#include "ze_carrier.h"
 
 typedef struct sm_req_internal_t {
 	struct sm_req_internal_t *next;
@@ -34,22 +35,17 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 		LOGW("cannot allocate streaming manager");
 		return NULL;
 	}
-
 	memset(temp, 0, sizeof(stream_context_t));
-
-	//temp->server = cctx;
 
 	temp->sensorManager = NULL;
 	temp->sensorEventQueue = NULL;
 	temp->looper = NULL;
-
-	/* TODO Initialize properly the .sensors array,
-	 * even though the memset above likely does already
-	 * this job
-	 */
+	temp->carrq = NULL;
 
 	return temp;
 }
+
+
 
 /* Some forward declarations for functions that are not really interface
  * and therefore not suitable in the header file. */
@@ -58,6 +54,12 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 
+void proximity_carrier(int signum);
+
+/* To set at every stream stop and reset
+ * at every stream start.
+ */
+int prox_carrier_stop;
 
 void *
 ze_coap_streaming_thread(void* args) {
@@ -84,6 +86,14 @@ ze_coap_streaming_thread(void* args) {
 	// Register in context the ZeGPSManager class
 	mngr->ZeGPSManager = ar->ZeGPSManager;
 
+	// Create the Carriers Queue
+	mngr->carrq = init_carriers_queue();
+	if(mngr->carrq == NULL) {
+		LOGW("Cannot initialize Carriers Queue");
+		exit(1);
+	}
+
+
 	/*-------------------------- Prepare the mngr context -----------------------*/
 
     // Prepare looper
@@ -98,6 +108,19 @@ ze_coap_streaming_thread(void* args) {
     mngr->sensorEventQueue =
     		ASensorManager_createEventQueue(mngr->sensorManager, mngr->looper, 45, NULL, NULL);
     LOGI("SM, got sensorEventQueue");
+
+	/* TODO Initialize properly the .sensors array in all its fields. */
+	int i;
+	for (i=0;i<ZE_NUMSENSORS;i++) {
+		mngr->sensors[i].sensor = i;
+		if (i == ASENSOR_TYPE_PROXIMITY) {// Initialize mutex for the proximity sensor's carrier
+			int error = pthread_mutex_init(&(mngr->sensors[i].carrthrmtx), NULL);
+			if (error) {
+				LOGW("Failed to initialize proxmtx:%s\n", strerror(error));
+				return NULL;
+			}
+		}
+	}
 
     /* Create ZeGPSManager instance and initialize it
      * Note that it is placed inside a ze_sensor_t's
@@ -115,6 +138,7 @@ ze_coap_streaming_thread(void* args) {
     	LOGW("ZeGPSManager instance cannot be constructed");
 	(*mngr->env)->CallVoidMethod(mngr->env, mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager,
 			ZeGPSManager_init, actx);
+
 
 
 	ASensorEvent event;
@@ -250,8 +274,9 @@ ze_coap_streaming_thread(void* args) {
 						event.acceleration.x, event.acceleration.y,
 						event.acceleration.z);
 			}
-
-			LOGW("Frequency of this sensor is:%d", mngr->sensors[event.type].freq);
+			else if (event.type == ASENSOR_TYPE_PROXIMITY) {
+				LOGI("prox: p=%f", event.distance);
+			}
 
             /* Update cache in any case. */
             mngr->sensors[event.type].event_cache = event;
@@ -294,6 +319,25 @@ ze_coap_streaming_thread(void* args) {
 			 * not at the sample layer..
 			 */
 			if (mngr->sensors[event.type].streams != NULL) {
+
+	            /* We're now sure that there is a sample in the cache
+	             * and that this sensor needs a carriers stream because
+	             * there is a stream associated to it. Thus
+	             * we start the carrier stream for that sensor
+	             * (recall that the carrier stream
+	             * confirms the sample that is in the cache)
+	             */
+				if (event.type == ASENSOR_TYPE_PROXIMITY /* || other event based sensors.. */
+						&& mngr->sensors[event.type].carrier_thread_started==0) {
+					/* It's ok to pass these pointers to another thread,
+					 * Streaming Manager and its sensor array will never move. */
+					struct generic_carr_thread_args pcargs;
+					pcargs.carrq = mngr->carrq;
+					pcargs.sensor = &(mngr->sensors[event.type]);
+					int smerr = pthread_create(&(mngr->sensors[event.type].carrier_thread), NULL,
+							ze_carrier_thread, &pcargs);
+					mngr->sensors[event.type].carrier_thread_started = 1;
+				}
 
 				/* TODO: for the moment notify all the streams regardless of frequency. */
 				stream = mngr->sensors[event.type].streams;
@@ -384,6 +428,9 @@ ze_coap_streaming_thread(void* args) {
 	if ( !ZeGPSManager_destroy ) LOGW("ZeGPSManager's destroy() not found");
 	(*mngr->env)->CallIntMethod(mngr->env,
 			mngr->sensors[ZESENSE_SENSOR_TYPE_LOCATION].gpsManager, ZeGPSManager_destroy);
+	/*
+	 * TODO: do the same for the proximity carrier thead!!!
+	 */
 
 
 	/* Detach this thread from JVM. */
@@ -700,7 +747,29 @@ int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 			return 0;
 		}
 	}
+		/*
+		double f = 1/freq;
+		int sec = (int)f; //isolate integer part
+		double decpart = f - sec; //isolate decimal part
+		long nsec = decpart * 1000000000LL; //enlarge to 10^9 (need nsec) and cut the rest
+		LOGW("Activating proximity period sec:%d, nsec:%d", sec, nsec);
+
+		signal(SIGALRM, (void (*)(int)) proximity_carrier);
+		timer_create(CLOCK_REALTIME, NULL, &mngr->sensors[sensor].timerid);
+		struct itimerspec value;
+		value.it_interval.tv_sec = sec; //subsequent shots. if 0 only first shot
+		value.it_interval.tv_nsec = nsec;
+		value.it_value.tv_sec = sec; //first shot
+		value.it_value.tv_nsec = nsec;
+		timer_settime(mngr->sensors[sensor].timerid, 0, &value, NULL);
+		*/
+
 	else {
+
+		if (sensor == ASENSOR_TYPE_PROXIMITY) {
+			prox_carrier_stop = 0;
+		}
+
 		/* Grab reference from Android */
 		mngr->sensors[sensor].android_handle =
 				ASensorManager_getDefaultSensor(mngr->sensorManager, sensor);
@@ -742,6 +811,11 @@ int android_sensor_changef(stream_context_t *mngr, int sensor, int freq) {
 
 		if (!changed) return SM_ERROR;
 	}
+	//else if () {
+		// do nothing because the carrier stream
+		// reads at every cycle the value of sensors[].freq
+		// to adjust its cycle period
+	//}
 	else {
 
 		int error = ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
@@ -776,7 +850,19 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 		 * only once at thread start!
 		 */
 	}
+		/*
+		struct itimerspec value;
+		value.it_interval.tv_sec = 0; //subsequent shots. if 0 only first shot
+		value.it_interval.tv_nsec = 0;
+		value.it_value.tv_sec = 0; //first shot, if 0 timer disarmed
+		value.it_value.tv_nsec = 0;
+		timer_settime(mngr->sensors[sensor].timerid, 0, &value, NULL);
+		*/
 	else {
+
+		if (sensor == ASENSOR_TYPE_PROXIMITY) {
+
+		}
 
 		int error = ASensorEventQueue_disableSensor(mngr->sensorEventQueue,
 				mngr->sensors[sensor].android_handle);
@@ -794,6 +880,24 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 	mngr->sensors[sensor].is_active = 0;
 
 	return 0;
+}
+
+/*
+ * A signal handler can interrupt the program at any point.
+ * This means, unless you've taken care to ensure this
+ * can't happen, it could run with various data objects
+ * it wants to work with in inconsistent state. For instance
+ * the buffer pointers inside a FILE might be only partially
+ * updated, or the linked list of open FILEs might have a
+ * halfway-inserted or halfway-removed item partly linked
+ * to it. Or the internal malloc data structures might
+ * have halfway-freed memory referenced... If the signal
+ * handler calls functions that depend on that state being
+ * consistent, very bad things will happen!
+ */
+void proximity_carrier(int signum) {
+	LOGI("Proximity carrier timer fired");
+	//how to not prioritize it wrt other sensor samples?
 }
 
 

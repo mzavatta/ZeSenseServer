@@ -31,6 +31,10 @@ ze_coap_init_resources(coap_context_t *context) {
 	coap_add_resource(context, r);
 	r = NULL;
 
+	r = ze_coap_init_proximity();
+	coap_add_resource(context, r);
+	r = NULL;
+
 	/* Other resources to follow... */
 }
 
@@ -89,6 +93,8 @@ accel_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
 void
 accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
+	LOGI("Proximity on_unregister entered..");
+
 	generic_on_unregister(ctx, reg, ASENSOR_TYPE_ACCELEROMETER);
 }
 
@@ -101,7 +107,7 @@ ze_coap_init_location() {
 
 	coap_resource_t *r;
 
-	r = coap_resource_init((unsigned char *)"location", 8, 0);
+	r = coap_resource_init((unsigned char *)"location", 9, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, location_GET_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
@@ -136,7 +142,59 @@ location_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 void
 location_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
+	LOGI("Location on_unregister entered..");
+
 	generic_on_unregister(ctx, reg, ZESENSE_SENSOR_TYPE_LOCATION);
+}
+
+/*-------------------------------- Proximity ---------------------------------------------*/
+
+coap_resource_t *
+ze_coap_init_proximity() {
+
+	LOGI("Initializing proximity..");
+
+	coap_resource_t *r;
+
+	r = coap_resource_init((unsigned char *)"proximity", 9, 0);
+	coap_register_handler(r, COAP_REQUEST_GET, proximity_GET_handler);
+	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
+	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
+
+	/* Need to register on_unregister() handler. */
+	r->on_unregister = &proximity_on_unregister;
+
+	r->observable = 1;
+
+	/*
+	coap_add_attr(r, (unsigned char *)"ct", 2, (unsigned char *)"0", 1, 0);
+	coap_add_attr(r, (unsigned char *)"title", 5, (unsigned char *)"\"Internal Clock\"", 16, 0);
+	coap_add_attr(r, (unsigned char *)"rt", 2, (unsigned char *)"\"Ticks\"", 7, 0);
+	coap_add_attr(r, (unsigned char *)"if", 2, (unsigned char *)"\"clock\"", 7, 0);
+	*/
+
+	return r;
+}
+
+void
+proximity_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Recognized proximity GET request, entered handler!");
+
+	generic_GET_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_PROXIMITY);
+
+}
+
+void
+proximity_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+
+
+	LOGI("Proximity on_unregister entered..");
+
+	generic_on_unregister(ctx, reg, ASENSOR_TYPE_PROXIMITY);
 }
 
 /*------------------------------- Generics -----------------------------------------------*/
@@ -152,7 +210,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	coap_async_state_t *asy;
 
 	/* TODO
-	 * Instead of setting 20Hz by default
+	 * Instead of setting 5Hz by default
 	 * interpret parameters in the request query
 	 * string
 	 */
@@ -267,7 +325,6 @@ void
 generic_on_unregister(coap_context_t *ctx, coap_registration_t *reg,
 		int sensor) {
 
-	LOGI("Accelerometer on_unregister entered..");
 
 	/* I think this is the best place to invalidate the registration */
 	LOGI("Invalidating");

@@ -6,8 +6,6 @@
  * <marco.zavatta@telecom-bretagne.eu>
  * <marco.zavatta@mail.polimi.it>
  */
-
-
 #ifndef ZE_STREAMING_MANAGER_H
 #define ZE_STREAMING_MANAGER_H
 
@@ -21,6 +19,7 @@
 #include "asynchronous.h"
 #include "ze_log.h"
 #include "ze_ticket.h"
+#include "ze_carriers_queue.h"
 
 /*
  * <source>/hardware/libhardware/include/hardware/sensors.h
@@ -52,6 +51,9 @@ enum {
 #define ZESENSE_SENSOR_TYPE_ORIENTATION		3
 #define ZESENSE_SENSOR_TYPE_PRESSURE		6
 #define ZESENSE_SENSOR_TYPE_LOCATION		14
+
+/* Carrier frequency definitions. */
+#define PROX_CARRIER_FREQ	5 //Hz
 
 /* Error conditions */
 #define SM_ERROR			(-1)
@@ -143,15 +145,29 @@ typedef struct ze_sensor_t {
 	 * mechanism instead) */
 	//str uri;
 
-	int sensor; /* Useless if we use an array
-				 * whose index is mirrored to sensor types
-				 * but still useful to make an instance of
-				 * this struct self-descriptive. */
+	/* Useless if we use an array
+	 * whose index is mirrored to sensor types
+	 * but still useful to make an instance of
+	 * this struct self-descriptive. */
+	int sensor;
 
-	/* XXX: does const make sense?
-	 * XXX: why not a union? */
+
+	/* Fields of this group will be meaningful
+	 * or meaningless depending on the sensor
+	 * type that is represented.
+	 */
+	/* XXX: does const make sense? */
 	ASensor* android_handle;
 	jobject gpsManager; //an instance of ZeGPSManager
+	pthread_t carrier_thread;
+	/* Avoid to start carrier_thread more than once
+	 * at the same time. This flag is to be set
+	 * when we start carrier_thread. carrier_thread
+	 * clears it when it finishes! */
+	int carrier_thread_started;
+	/* Mutex to concert access to this element with its carrier thred. */
+	pthread_mutex_t carrthrmtx;
+
 
 	/* Consider an "is_active" flag,
 	 * indeed the NDK sensor API does not offer
@@ -174,6 +190,9 @@ typedef struct ze_sensor_t {
 	 *
 	 * To make it uniform the is_active flag
 	 * is probably the best solution.
+	 *
+	 * This solution is also useful for the carrier stream thread
+	 * to know when to exit.
 	 */
 	int is_active; // 1 if active, 0 if not.
 
@@ -186,8 +205,26 @@ typedef struct ze_sensor_t {
 	/* List of one-shot requests registered on this sensor */
 	ze_oneshot_t *oneshots;
 
-	/* Local status variables */
+	/* This is the current frequency at which the sensor
+	 * is delivering data, be it an Android sensor or the
+	 * GPS. For unknown frequency Android sensors this
+	 * is the frequency of the carrier stream.
+	 * Note the similarity between the management in terms of
+	 * frequency of an actual known-frequency sensor and a
+	 * carrier stream.
+	 * Since there is only one source for each sensor,
+	 * if there is more than one stream subscribed to this sensor
+	 * this frequency will represent the maximum of the frequencies
+	 * requested by the streams on the sensor.
+	 * The sensor will always push at the maximum frequency, it is the
+	 * application jobs to distinguish if a sample should be
+	 * sent upon some stream or not. (every sample that is pushed
+	 * will be sent upon the highest frequency stream, but some
+	 * samples will not be sent upon streams of lower frequeccy).
+	 */
 	int freq;
+
+	/* Local status variables */
 	int last_wts;
 	int last_rtpts;
 } ze_sensor_t;
@@ -209,14 +246,24 @@ typedef struct stream_context_t {
 	 * only coap_context_t as parameter..) */
 	//coap_context_t *server;
 
-	/* Android sensor infrastructure */
-	ASensorManager* sensorManager;
+	/* Here we could register the two queues that talk
+	 * to the protocol implementation.. it's
+	 * logical, isn't it? We have all the components that
+	 * the SM needs in here..
+	 */
 
+	/* Android  sensor infrastructure */
+	ASensorManager* sensorManager;
 	ASensorEventQueue* sensorEventQueue;
 	ALooper* looper;
 
+	/* Location sensor infrastructure. */
 	JNIEnv* env;
 	jclass ZeGPSManager; //the Java class object
+
+	/* Global carriers infrastructure. */
+	ze_carriers_queue_t *carrq;
+
 } stream_context_t;
 
 
@@ -227,6 +274,12 @@ typedef struct {
 	unsigned char *data;
 	int length; //length of the *data field
 } ze_sm_packet_t;
+
+
+struct generic_carr_thread_args {
+	ze_carriers_queue_t *carrq;
+	ze_sensor_t *sensor;
+};
 
 /*
 inline int CHECK_OUT_RANGE(int sensor) {

@@ -25,6 +25,8 @@ typedef struct sm_req_internal_t {
 
 ze_sm_packet_t* form_sm_packet(ASensorEvent event);
 
+struct generic_carr_thread_args pcargs;
+
 stream_context_t *
 get_streaming_manager(/*coap_context_t  *cctx*/) {
 
@@ -45,6 +47,8 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 	return temp;
 }
 
+#define SAMPLES_QUEUE 1
+#define CARRIERS_QUEUE 2
 
 
 /* Some forward declarations for functions that are not really interface
@@ -215,9 +219,8 @@ ze_coap_streaming_thread(void* args) {
 		}
 		else if (sm_req.rtype == SM_REQ_ONESHOT) {
 			LOGI("SM we got a ONESHOT request");
-			if (mngr->sensors[sm_req.sensor].is_active != 0) {
-				/* Sensor is active, suppose cache is fresh
-				 * and serve the oneshot request immediately. */
+			if (mngr->sensors[sm_req.sensor].cache_valid == 1) {
+				/* Cache is fresh. */
 
 				LOGI("SM serving oneshot request from cache");
 
@@ -232,7 +235,7 @@ ze_coap_streaming_thread(void* args) {
 						COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 			}
 			else {
-				/* Sensor is not active, cache may be old.
+				/* Cache may be old.
 				 * Activate the sensor and register oneshot request
 				 * to be satisfied by the first matching sample that
 				 * emerges from the sample queue.
@@ -263,11 +266,41 @@ ze_coap_streaming_thread(void* args) {
 
 
 		/*-------------------------Send some samples-----------------------------------*/
-
+		int qselect = SAMPLES_QUEUE;
 		while (queuecount < QUEUE_REQ_RATIO) {
 
-		/* Is this blocking? doesn't seem like.. and that's good. */
-		if (ASensorEventQueue_getEvents(mngr->sensorEventQueue, &event, 1) > 0) {
+		/*
+		 * This way of scheduling pickup from the two queues is a bit
+		 * unfair though.. favors the sensors that use the queue used
+		 * by less sensors..
+		 */
+		int have_events = 0;
+		if (qselect == SAMPLES_QUEUE) {
+			have_events = ASensorEventQueue_getEvents(mngr->sensorEventQueue, &event, 1);
+			/* Only write the cache for the carrier to produce the stream..
+			 * The stream to the receiver, for the event based sensors, is made only
+			 * of the carrier samples and not of real samples.
+			 * This method greatly simplifies the assignment of timestamps
+			 * to the real samples, paying the price that real samples will be desynch
+			 * with the other streams of at most tau_carrier. */
+			while (have_events>0 &&
+					(event.type == ASENSOR_TYPE_PROXIMITY)) { // or any other event based sensor
+					LOGI("Real value detected sensor type:%d p=%f", event.type, event.distance);
+					write_last_event_SYN(&(mngr->sensors[event.type]), event);
+		            //mngr->sensors[event.type].event_cache = event;
+		            mngr->sensors[event.type].cache_valid = 1;
+		            have_events = ASensorEventQueue_getEvents(mngr->sensorEventQueue, &event, 1);
+		            //exit(1);
+			}
+		}
+		else if (qselect == CARRIERS_QUEUE) {
+			have_events = get_carrier_event(mngr->carrq, &event);
+		}
+
+		/*
+		// Is this blocking? doesn't seem like.. and that's good.
+		if (ASensorEventQueue_getEvents(mngr->sensorEventQueue, &event, 1) > 0) { */
+		if (have_events > 0) {
 
 			if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
             	LOGI("accel: x=%f y=%f z=%f",
@@ -275,11 +308,15 @@ ze_coap_streaming_thread(void* args) {
 						event.acceleration.z);
 			}
 			else if (event.type == ASENSOR_TYPE_PROXIMITY) {
-				LOGI("prox: p=%f", event.distance);
+				LOGI("Fake proximity value prox: p=%f", event.distance);
 			}
 
-            /* Update cache in any case. */
-            mngr->sensors[event.type].event_cache = event;
+            /* Update cache if the event is not a fake produced by
+             * a carrier. */
+			if (qselect == SAMPLES_QUEUE) {
+				mngr->sensors[event.type].event_cache = event;
+				mngr->sensors[event.type].cache_valid = 1;
+			}
 
             /* If we have any oneshot for this sensor,
              * we need their tickets before sending the event,
@@ -319,25 +356,6 @@ ze_coap_streaming_thread(void* args) {
 			 * not at the sample layer..
 			 */
 			if (mngr->sensors[event.type].streams != NULL) {
-
-	            /* We're now sure that there is a sample in the cache
-	             * and that this sensor needs a carriers stream because
-	             * there is a stream associated to it. Thus
-	             * we start the carrier stream for that sensor
-	             * (recall that the carrier stream
-	             * confirms the sample that is in the cache)
-	             */
-				if (event.type == ASENSOR_TYPE_PROXIMITY /* || other event based sensors.. */
-						&& mngr->sensors[event.type].carrier_thread_started==0) {
-					/* It's ok to pass these pointers to another thread,
-					 * Streaming Manager and its sensor array will never move. */
-					struct generic_carr_thread_args pcargs;
-					pcargs.carrq = mngr->carrq;
-					pcargs.sensor = &(mngr->sensors[event.type]);
-					int smerr = pthread_create(&(mngr->sensors[event.type].carrier_thread), NULL,
-							ze_carrier_thread, &pcargs);
-					mngr->sensors[event.type].carrier_thread_started = 1;
-				}
 
 				/* TODO: for the moment notify all the streams regardless of frequency. */
 				stream = mngr->sensors[event.type].streams;
@@ -383,6 +401,10 @@ ze_coap_streaming_thread(void* args) {
 			}
 
 		}
+
+		if (qselect == SAMPLES_QUEUE) qselect = CARRIERS_QUEUE;
+		else qselect = SAMPLES_QUEUE;
+
 		queuecount++;
 		}
 
@@ -432,6 +454,8 @@ ze_coap_streaming_thread(void* args) {
 	 * TODO: do the same for the proximity carrier thead!!!
 	 */
 
+	int *exitcode;
+	pthread_join(mngr->sensors[ASENSOR_TYPE_PROXIMITY].carrier_thread, &exitcode);
 
 	/* Detach this thread from JVM. */
 	(*jvm)->DetachCurrentThread(jvm);
@@ -519,7 +543,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	if (newstream == NULL) return NULL;
 	newstream->reg = reg;
 	newstream->freq = freq;
-	newstream->last_rtpts = RTP_TS_START;
+	newstream->last_rtpts = (rand() % 100)+400;
 	newstream->last_wts = 0;
 	/* TODO randomize rtpts since its first assignment
 	 */
@@ -534,9 +558,9 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 			LOGW("SM inconsistent state, sensor is not active but there"
 					"are streams active on it");
 
-		android_sensor_activate(mngr, sensor_id, freq);
-
 		mngr->sensors[sensor_id].freq = freq;
+
+		android_sensor_activate(mngr, sensor_id, freq);
 	}
 	/* Sensor is already active.
 	 * Re-evaluate its frequency based on the new request
@@ -612,7 +636,7 @@ int sm_stop_stream(stream_context_t *mngr, int sensor_id, ticket_t reg) {
 		 * just take the maximum of those left
 		 * (TODO: it's not optimal, first of all the deleted stream
 		 * might not have been the maximum, and also the maximum
-		 * of those left might been equal to the previous one)
+		 * of those left might be equal to the previous one)
 		 */
 		temp = mngr->sensors[sensor_id].streams;
 		mngr->sensors[sensor_id].freq = temp->freq;
@@ -717,10 +741,9 @@ ze_oneshot_t *sm_find_oneshot(stream_context_t *mngr, int sensor_id, ticket_t on
  * between ze_sensor_t instance and the sensor it represents is
  * memorized with outer data.
  */
-
 int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 
-	LOGI("SM Turning on android sensor%d", sensor);
+	LOGI("SM Turning on android sensor%d freq%d", sensor, freq);
 
 	//CHECK_OUT_RANGE(sensor);
 
@@ -766,10 +789,6 @@ int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 
 	else {
 
-		if (sensor == ASENSOR_TYPE_PROXIMITY) {
-			prox_carrier_stop = 0;
-		}
-
 		/* Grab reference from Android */
 		mngr->sensors[sensor].android_handle =
 				ASensorManager_getDefaultSensor(mngr->sensorManager, sensor);
@@ -783,6 +802,31 @@ int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 
 			/* Properly flag it. */
 			mngr->sensors[sensor].is_active = 1;
+
+			/* Important to start the thread after the is_active is set,
+			 * the thread checks this flag to know when to exit, so if we
+			 * start the thread before setting the flag and the scheduler
+			 * immediately runs some instruction from the thread,
+			 * it will exit immediately.
+			 */
+			if (sensor == ASENSOR_TYPE_PROXIMITY //or any other event based sensor
+					&& mngr->sensors[sensor].carrier_thread_started == 0) {
+				/* Besides starting the real sample delivery,
+				 * for this class of sensors start also the carrier stream.
+	             * (recall that the carrier stream
+	             * confirms the sample that is in the cache)
+	             *
+	             * It's ok to pass these pointers to another thread,
+				 * Streaming Manager and its sensor array will never move.
+	             */
+				pcargs.carrq = mngr->carrq;
+				pcargs.sensor = &(mngr->sensors[sensor]);
+				int carrerr = pthread_create(&(mngr->sensors[sensor].carrier_thread), NULL,
+						ze_carrier_thread, &pcargs);
+				if (carrerr != 0) return SM_ERROR;
+				mngr->sensors[sensor].carrier_thread_started = 1;
+				prox_carrier_stop = 0;
+			}
 
 			return 0;
 		}
@@ -811,12 +855,13 @@ int android_sensor_changef(stream_context_t *mngr, int sensor, int freq) {
 
 		if (!changed) return SM_ERROR;
 	}
-	//else if () {
-		// do nothing because the carrier stream
-		// reads at every cycle the value of sensors[].freq
-		// to adjust its cycle period
-	//}
 	else {
+
+		/*if (sensor == ASENSOR_TYPE_PROXIMITY) { //or any sensor of this class
+			do nothing because the carrier stream
+			reads at every cycle the value of sensors[].freq
+			to adjust its cycle period
+		}*/
 
 		int error = ASensorEventQueue_setEventRate(mngr->sensorEventQueue,
 				mngr->sensors[sensor].android_handle, (1000L/freq)*1000);
@@ -860,10 +905,6 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 		*/
 	else {
 
-		if (sensor == ASENSOR_TYPE_PROXIMITY) {
-
-		}
-
 		int error = ASensorEventQueue_disableSensor(mngr->sensorEventQueue,
 				mngr->sensors[sensor].android_handle);
 
@@ -878,6 +919,7 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 	}
 
 	mngr->sensors[sensor].is_active = 0;
+	mngr->sensors[sensor].cache_valid = 0;
 
 	return 0;
 }
@@ -922,9 +964,55 @@ form_sm_packet(ASensorEvent event) {
 		c->data = temp;
 		c->length = sizeof(ze_accel_vector_t);
 	}
+	else if (event.type == ASENSOR_TYPE_PROXIMITY) {
+		c->sensor = ASENSOR_TYPE_PROXIMITY;
+		ze_prox_vector_t *temp = malloc(sizeof(ze_prox_vector_t));
+		if (temp==NULL) return NULL;
+		memset(temp, 0, sizeof(ze_prox_vector_t));
+		sprintf(temp->distance, "%e", event.distance);
+		c->data = temp;
+		c->length = sizeof(ze_prox_vector_t);
+	}
 
 	return c;
 }
+
+
+/* We synch access to event_cache and freq because they are
+ * not natural data types "int" for any platform so operations
+ * on them will most likely not be atomic.
+ */
+ASensorEvent read_last_event_SYN(ze_sensor_t *sensor) {
+	LOGW("Reading last event..");
+	pthread_mutex_lock(&(sensor->carrthrmtx));
+		ASensorEvent ev = sensor->event_cache;
+	pthread_mutex_unlock(&(sensor->carrthrmtx));
+	LOGW("Mutex released");
+	return ev;
+}
+int write_last_event_SYN(ze_sensor_t *sensor, ASensorEvent ev) {
+	LOGW("Writing last event..");
+	pthread_mutex_lock(&(sensor->carrthrmtx));
+		sensor->event_cache = ev;
+	pthread_mutex_unlock(&(sensor->carrthrmtx));
+	LOGW("Mutex released");
+	return 1;
+}
+
+/*
+double read_stream_freq_SYN(ze_sensor_t *sensor) {
+	pthread_mutex_lock(&(sensor->carrthrmtx));
+		double freq = sensor->freq;
+	pthread_mutex_unlock(&(sensor->carrthrmtx));
+	return freq;
+}
+int write_stream_freq_SYN(ze_sensor_t *sensor, double freq) {
+	pthread_mutex_lock(&(sensor->carrthrmtx));
+		sensor->freq = freq;
+	pthread_mutex_unlock(&(sensor->carrthrmtx));
+	return 1;
+}
+*/
 
 
 /*ze_payload_t *

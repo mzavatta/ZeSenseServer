@@ -214,7 +214,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	 * interpret parameters in the request query
 	 * string
 	 */
-	int freq = 5;
+	int freq = 1;
 
 	obopt = coap_check_option(request, COAP_OPTION_SUBSCRIPTION, &opt_iter);
 	if (obopt != NULL) { //There is an observe option

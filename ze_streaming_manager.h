@@ -165,7 +165,7 @@ typedef struct ze_sensor_t {
 	 * when we start carrier_thread. carrier_thread
 	 * clears it when it finishes! */
 	int carrier_thread_started;
-	/* Mutex to concert access to this element with its carrier thred. */
+	/* Mutex to concert access to this element and its carrier thread. */
 	pthread_mutex_t carrthrmtx;
 
 
@@ -196,8 +196,14 @@ typedef struct ze_sensor_t {
 	 */
 	int is_active; // 1 if active, 0 if not.
 
-	/* Quick access to last known sensor value */
+	/* Quick access to last known sensor value.
+	 * A sensor may be active but its cache may not be valid,
+	 * e.g. at sensor start, when we set the is_active flag
+	 * but no sample has yet been taken.
+	 * On the contrary an inactive sensor will always
+	 * have an invalid cache. */
 	ASensorEvent event_cache;
+	int cache_valid;
 
 	/* List of streams registered on this sensor */
 	ze_stream_t *streams;
@@ -292,6 +298,13 @@ if (sensor<0 || sensor>=ZE_NUMSENSORS) {
 /*
  *
  */
+
+/* We synch access to each sensor's event_cache because
+ * being a structure its access will most likely not be
+ * atomic
+ */
+ASensorEvent read_last_event_SYN(ze_sensor_t *sensor);
+int write_last_event_SYN(ze_sensor_t *sensor, ASensorEvent ev);
 
 void *
 ze_coap_streaming_thread(void* args);

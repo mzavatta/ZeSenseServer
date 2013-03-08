@@ -214,7 +214,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 	 * interpret parameters in the request query
 	 * string
 	 */
-	int freq = 1;
+	int freq = 5;
 
 	obopt = coap_check_option(request, COAP_OPTION_SUBSCRIPTION, &opt_iter);
 	if (obopt != NULL) { //There is an observe option
@@ -277,7 +277,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 			asy = coap_register_async(context, peer, request,
 					COAP_ASYNC_SEPARATE, NULL);
 
-			put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, ASENSOR_TYPE_ACCELEROMETER,
+			put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, sensor,
 					(ticket_t)(asy->id), 0);
 
 			/*

@@ -22,7 +22,7 @@
 ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
 ze_payload_t* form_sr_payload(coap_registration_t *reg);
 uint64_t htonll(uint64_t value);
-uint64_t get_ntp();
+//uint64_t get_ntp();
 
 #define CNAME "android@zesense"
 #define CNAME_LENGTH 15
@@ -483,12 +483,4 @@ htonll(uint64_t value) {
 	    	return vd;
 	    }
 	    else return value;
-}
-
-
-uint64_t get_ntp() {
-	struct timespec t;
-	clock_gettime(CLOCK_MONOTONIC, &t);
-	uint64_t ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
-	return ntp;
 }

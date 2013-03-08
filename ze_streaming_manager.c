@@ -433,7 +433,7 @@ ze_coap_streaming_thread(void* args) {
 
 		struct timespec rqtp;
 		rqtp.tv_sec = 0;
-		rqtp.tv_nsec = 5000000; //1msec
+		rqtp.tv_nsec = 1000000; //1msec
 		nanosleep(&rqtp, NULL);
 
 	} /*thread loop end*/

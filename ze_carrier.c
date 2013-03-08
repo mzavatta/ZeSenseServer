@@ -1,6 +1,7 @@
 #include "ze_streaming_manager.h"
 #include "ze_coap_server_root.h"
 #include "ze_carriers_queue.h"
+#include "ze_timing.h"
 
 /*
  * Alternative implementation of this thread,
@@ -28,6 +29,7 @@ ze_carrier_thread(void* args) {
 		if (sensor->cache_valid==1) {
 			ASensorEvent etp;
 			etp = read_last_event_SYN(sensor);
+			etp.timestamp = get_ntp();
 			put_carrier_event(carrq, etp);
 		}
 		/* Evaluate, based on the highest frequency requested

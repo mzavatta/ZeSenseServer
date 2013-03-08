@@ -54,7 +54,7 @@
 int interpret_sdes(unsigned char *chunk, int length);
 int interpret_rr(unsigned char *chunk, int length);
 int rtp_read_dispatch(rtp_context_t *rctx);
-uint64_t get_ntp();
+//uint64_t get_ntp();
 
 
 void *
@@ -272,13 +272,13 @@ ze_rtp_server_core_thread(void *args) {
 	return 0;
 
 }
-
+/*
 uint64_t get_ntp() {
 	struct timespec t;
 	clock_gettime(CLOCK_MONOTONIC, &t);
 	uint64_t ntp = (t.tv_sec*1000000000LL)+t.tv_nsec;
 	return ntp;
-}
+}*/
 
 /* Big mess of the RTCP parsing.. */
 int

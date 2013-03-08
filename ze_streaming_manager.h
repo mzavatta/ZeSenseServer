@@ -275,7 +275,7 @@ typedef struct stream_context_t {
 
 typedef struct {
 	int sensor;
-	uint64_t ntpts;
+	int64_t ntpts;
 	int rtpts;
 	unsigned char *data;
 	int length; //length of the *data field

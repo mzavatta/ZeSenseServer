@@ -73,6 +73,29 @@ void
 proximity_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
 /*-------------------------------------------------------------------------*/
 
+/*--------- Light ---------------------------------------------------------*/
+coap_resource_t * ze_coap_init_light();
+
+void light_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response);
+
+void light_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
+/*---------------------------------------------------------------------------*/
+/*--------- Orientation -----------------------------------------------------*/
+coap_resource_t *ze_coap_init_orient();
+
+void orient_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response);
+void orient_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
+/*----------------------------------- Gyroscope --------------------------------------------*/
+coap_resource_t * ze_coap_init_gyro();
+
+void gyro_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response);
+void gyro_on_unregister(coap_context_t *ctx, coap_registration_t *reg);
 /*--------- Generics --------------------------------------------------*/
 void
 generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,

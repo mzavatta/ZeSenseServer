@@ -7,7 +7,7 @@
  * Alternative implementation of this thread,
  * rather than killing it at restarting it at
  * every stream stop or start, we could use a condition
- * variable on prox_carrier_stop;
+ * variable that waits on is_active
  */
 
 void *

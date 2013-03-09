@@ -84,6 +84,22 @@ typedef struct {
 	char distance[CHARLEN]; //tot 20 bytes
 } ze_prox_vector_t;
 
+typedef struct {
+	char light[CHARLEN]; //tot 20 bytes
+} ze_light_vector_t;
+
+typedef struct {
+	char azimuth[CHARLEN];				//0-19
+	char pitch[CHARLEN];				//20-39
+	char roll[CHARLEN];				//40-59
+} ze_orient_vector_t;			//tot 60 bytes
+
+typedef struct {
+	char x[CHARLEN];				//0-19
+	char y[CHARLEN];				//20-39
+	char z[CHARLEN];				//40-59
+} ze_gyro_vector_t;			//tot 60 bytes
+
 /* One struct for each sensor data because the transported
  * values are different: some are 2, 3 axis, some transport
  * integers and others transport floats etc..

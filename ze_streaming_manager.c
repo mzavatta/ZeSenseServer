@@ -25,7 +25,8 @@ typedef struct sm_req_internal_t {
 
 ze_sm_packet_t* form_sm_packet(ASensorEvent event);
 
-struct generic_carr_thread_args pcargs;
+struct generic_carr_thread_args pcargs; //proximity carrier thread args
+struct generic_carr_thread_args ocargs; //orientation carrier thread args
 
 stream_context_t *
 get_streaming_manager(/*coap_context_t  *cctx*/) {
@@ -58,12 +59,23 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 
-void proximity_carrier(int signum);
+//void proximity_carrier(int signum); //signal handler for deprecated implementation of carriers
 
-/* To set at every stream stop and reset
- * at every stream start.
- */
-int prox_carrier_stop;
+#define NUM_SAMPLES 3000
+struct zs_ASensorEvent {
+	int64_t gents; //as it is fed into the event interface
+	int64_t collts; //when we collect it
+};
+struct zs_ASensorEvent accel_events_list[NUM_SAMPLES];
+int64_t accel_periods[NUM_SAMPLES];
+struct zs_ASensorEvent prox_events_list[NUM_SAMPLES];
+int64_t prox_periods[NUM_SAMPLES];
+struct zs_ASensorEvent light_events_list[NUM_SAMPLES];
+int64_t light_periods[NUM_SAMPLES];
+struct zs_ASensorEvent orient_events_list[NUM_SAMPLES];
+int64_t orient_periods[NUM_SAMPLES];
+struct zs_ASensorEvent gyro_events_list[NUM_SAMPLES];
+int64_t gyro_periods[NUM_SAMPLES];
 
 void *
 ze_coap_streaming_thread(void* args) {
@@ -124,6 +136,13 @@ ze_coap_streaming_thread(void* args) {
 				return NULL;
 			}
 		}
+		else if (i == ZESENSE_SENSOR_TYPE_ORIENTATION) {// Initialize mutex for the (optional) orientation carrier
+			int error = pthread_mutex_init(&(mngr->sensors[i].carrthrmtx), NULL);
+			if (error) {
+				LOGW("Failed to initialize orientmtx:%s\n", strerror(error));
+				return NULL;
+			}
+		}
 	}
 
     /* Create ZeGPSManager instance and initialize it
@@ -178,6 +197,14 @@ ze_coap_streaming_thread(void* args) {
 	if ( !Location_getTime ) LOGW("Method getTime not found");
 
 
+	/* Preventatively flush sensor queue.. */
+	ASensorEvent evfl;
+	int gotfl = 1;
+	do {
+		gotfl = ASensorEventQueue_getEvents(mngr->sensorEventQueue, &evfl, 1);
+	}
+	while (gotfl > 0);
+
 
 	/* To control the time spent on streaming
 	 * wrt the time spent on serving requests
@@ -186,6 +213,12 @@ ze_coap_streaming_thread(void* args) {
 
 	/* Internal anti-deadlock mini queue. */
 	sm_req_internal_t *adqueue = NULL;
+
+	int accel_counter = 0, accel_samples_taken = 0;
+	int orient_counter = 0, orient_samples_taken = 0;
+	int light_counter = 0, light_samples_taken = 0;
+	int prox_counter = 0, prox_samples_taken = 0;
+	int gyro_counter = 0, gyro_samples_taken = 0;
 
 	while(!globalexit) { /*------- Thread loop start ---------------------------------*/
 
@@ -284,7 +317,8 @@ ze_coap_streaming_thread(void* args) {
 			 * to the real samples, paying the price that real samples will be desynch
 			 * with the other streams of at most tau_carrier. */
 			while (have_events>0 &&
-					(event.type == ASENSOR_TYPE_PROXIMITY)) { // or any other event based sensor
+					((event.type == ASENSOR_TYPE_PROXIMITY) ||
+					(event.type == ZESENSE_SENSOR_TYPE_ORIENTATION)) ) { // or any other event based sensor
 					LOGI("Real value detected sensor type:%d p=%f", event.type, event.distance);
 					write_last_event_SYN(&(mngr->sensors[event.type]), event);
 		            //mngr->sensors[event.type].event_cache = event;
@@ -303,12 +337,45 @@ ze_coap_streaming_thread(void* args) {
 		if (have_events > 0) {
 
 			if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
+            	accel_samples_taken++;
             	LOGI("accel: x=%f y=%f z=%f",
 						event.acceleration.x, event.acceleration.y,
 						event.acceleration.z);
+            	accel_events_list[accel_counter].gents = event.timestamp;
+            	accel_events_list[accel_counter].collts = get_ntp();
+            	accel_counter++;
 			}
 			else if (event.type == ASENSOR_TYPE_PROXIMITY) {
+            	prox_samples_taken++;
 				LOGI("Fake proximity value prox: p=%f", event.distance);
+            	prox_events_list[prox_counter].gents = event.timestamp;
+            	prox_events_list[prox_counter].collts = get_ntp();
+            	prox_counter++;
+			}
+			else if (event.type == ASENSOR_TYPE_LIGHT) {
+            	light_samples_taken++;
+				LOGI("Light value: L=%f", event.light);
+            	light_events_list[light_counter].gents = event.timestamp;
+            	light_events_list[light_counter].collts = get_ntp();
+            	light_counter++;
+			}
+			else if (event.type == ZESENSE_SENSOR_TYPE_ORIENTATION) {
+				orient_samples_taken++;
+				LOGI("event orient (may be fake mode): azi=%f pitch=%f roll=%f",
+        			event.vector.azimuth, event.vector.pitch,
+        			event.vector.roll);
+            	orient_events_list[orient_counter].gents = event.timestamp;
+            	orient_events_list[orient_counter].collts = get_ntp();
+            	orient_counter++;
+			}
+			else if (event.type == ASENSOR_TYPE_GYROSCOPE) {
+				gyro_samples_taken++;
+				LOGI("event gyro: x=%f y=%f z=%f",
+					event.vector.x, event.vector.y,
+					event.vector.z);
+            	gyro_events_list[gyro_counter].gents = event.timestamp;
+            	gyro_events_list[gyro_counter].collts = get_ntp();
+            	gyro_counter++;
 			}
 
             /* Update cache if the event is not a fake produced by
@@ -363,7 +430,13 @@ ze_coap_streaming_thread(void* args) {
 
 					pk = form_sm_packet(event);
 
-					pk->rtpts = stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq);
+					int correction_factor = 0;
+					/*if (event.type == ZESENSE_SENSOR_TYPE_ORIENTATION)
+						correction_factor = 20;
+					else correction_factor = 0;*/
+
+					pk->rtpts = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
+						+correction_factor;
 					stream->last_rtpts = pk->rtpts;
 					stream->last_wts = event.timestamp;
 
@@ -439,6 +512,82 @@ ze_coap_streaming_thread(void* args) {
 	} /*thread loop end*/
 
 
+	int k;
+	int accel_max_period = 0, accel_min_period = 0;
+	for (k=0; k<accel_samples_taken-1; k++) {
+		accel_periods[k] = accel_events_list[k+1].gents - accel_events_list[k].gents;
+		if (k==0) accel_min_period = accel_periods[k];
+		if (accel_periods[k]>accel_max_period) accel_max_period = accel_periods[k];
+		if (accel_periods[k]<accel_min_period) accel_min_period = accel_periods[k];
+	}
+	int64_t accel_incsum = 0;
+	for(k=0; k<accel_samples_taken-1; k++) {
+		accel_incsum+=accel_periods[k];
+	}
+	double accel_average = ((double)accel_incsum)/(accel_samples_taken-1);
+	LOGW("Accel periods average %e, max:%e, min:%e", accel_average,
+			(double)accel_max_period, (double)accel_min_period);
+
+	int orient_max_period = 0, orient_min_period = 0;
+	for (k=0; k<orient_samples_taken-1; k++) {
+		orient_periods[k] = orient_events_list[k+1].gents - orient_events_list[k].gents;
+		if (k==0) orient_min_period = orient_periods[k];
+		if (orient_periods[k]>orient_max_period) orient_max_period = orient_periods[k];
+		if (orient_periods[k]<orient_min_period) orient_min_period = orient_periods[k];
+	}
+	int64_t orient_incsum = 0;
+	for(k=0; k<orient_samples_taken-1; k++) {
+		orient_incsum+=orient_periods[k];
+	}
+	double orient_average = ((double)orient_incsum)/(orient_samples_taken-1);
+	LOGW("Orient periods average %e, max:%e, min:%e", orient_average,
+			(double)orient_max_period, (double)orient_min_period);
+
+	int light_max_period = 0, light_min_period = 0;
+	for (k=0; k<light_samples_taken-1; k++) {
+		light_periods[k] = light_events_list[k+1].gents - light_events_list[k].gents;
+		if (k==0) light_min_period = light_periods[k];
+		if (light_periods[k]>light_max_period) light_max_period = light_periods[k];
+		if (light_periods[k]<light_min_period) light_min_period = light_periods[k];
+	}
+	int64_t light_incsum = 0;
+	for(k=0; k<light_samples_taken-1; k++) {
+		light_incsum+=light_periods[k];
+	}
+	double light_average = ((double)light_incsum)/(light_samples_taken-1);
+	LOGW("Light periods average %e, max:%e, min:%e", light_average,
+			(double)light_max_period, (double)light_min_period);
+
+	int prox_max_period = 0, prox_min_period = 0;
+	for (k=0; k<prox_samples_taken-1; k++) {
+		prox_periods[k] = prox_events_list[k+1].gents - prox_events_list[k].gents;
+		if (k==0) prox_min_period = prox_periods[k];
+		if (prox_periods[k]>prox_max_period) prox_max_period = prox_periods[k];
+		if (prox_periods[k]<prox_min_period) prox_min_period = prox_periods[k];
+	}
+	int64_t prox_incsum = 0;
+	for(k=0; k<prox_samples_taken-1; k++) {
+		prox_incsum+=prox_periods[k];
+	}
+	double prox_average = ((double)prox_incsum)/(prox_samples_taken-1);
+	LOGW("Prox periods average %e, max:%e, min:%e", prox_average,
+			(double)prox_max_period, (double)prox_min_period);
+
+	int gyro_max_period = 0, gyro_min_period = 0;
+	for (k=0; k<gyro_samples_taken-1; k++) {
+		gyro_periods[k] = gyro_events_list[k+1].gents - gyro_events_list[k].gents;
+		if (k==0) gyro_min_period = gyro_periods[k];
+		if (gyro_periods[k]>gyro_max_period) gyro_max_period = gyro_periods[k];
+		if (gyro_periods[k]<gyro_min_period) gyro_min_period = gyro_periods[k];
+	}
+	int64_t gyro_incsum = 0;
+	for(k=0; k<gyro_samples_taken-1; k++) {
+		gyro_incsum+=gyro_periods[k];
+	}
+	double gyro_average = ((double)gyro_incsum)/(gyro_samples_taken-1);
+	LOGW("Gyro periods average %e, max:%e, min:%e", gyro_average,
+			(double)gyro_max_period, (double)gyro_min_period);
+
 	/*
 	 * TODO: Turn off all sensors that might still be active!
 	 * E.g. asked to quit the server while a stream is in
@@ -456,6 +605,7 @@ ze_coap_streaming_thread(void* args) {
 
 	int *exitcode;
 	pthread_join(mngr->sensors[ASENSOR_TYPE_PROXIMITY].carrier_thread, &exitcode);
+	pthread_join(mngr->sensors[ZESENSE_SENSOR_TYPE_ORIENTATION].carrier_thread, &exitcode);
 
 	/* Detach this thread from JVM. */
 	(*jvm)->DetachCurrentThread(jvm);
@@ -825,7 +975,15 @@ int android_sensor_activate(stream_context_t *mngr, int sensor, int freq) {
 						ze_carrier_thread, &pcargs);
 				if (carrerr != 0) return SM_ERROR;
 				mngr->sensors[sensor].carrier_thread_started = 1;
-				prox_carrier_stop = 0;
+			}
+			else if (sensor == ZESENSE_SENSOR_TYPE_ORIENTATION //or any other event based sensor
+					&& mngr->sensors[sensor].carrier_thread_started == 0) {
+				ocargs.carrq = mngr->carrq;
+				ocargs.sensor = &(mngr->sensors[sensor]);
+				int carrerr = pthread_create(&(mngr->sensors[sensor].carrier_thread), NULL,
+						ze_carrier_thread, &ocargs);
+				if (carrerr != 0) return SM_ERROR;
+				mngr->sensors[sensor].carrier_thread_started = 1;
 			}
 
 			return 0;
@@ -915,6 +1073,7 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 		 * though it is important because we look at
 		 * the NULLity of this pointer to see whether
 		 * a sensor is active or not.
+		 * (changed!! now there's the is_active flag)
 		 */
 	}
 
@@ -937,10 +1096,11 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
  * handler calls functions that depend on that state being
  * consistent, very bad things will happen!
  */
-void proximity_carrier(int signum) {
+//DEPRECATED IMPLEMENTATION IN FAVOR OR A THREAD
+/*void proximity_carrier(int signum) {
 	LOGI("Proximity carrier timer fired");
 	//how to not prioritize it wrt other sensor samples?
-}
+}*/
 
 
 ze_sm_packet_t *
@@ -972,6 +1132,37 @@ form_sm_packet(ASensorEvent event) {
 		sprintf(temp->distance, "%e", event.distance);
 		c->data = temp;
 		c->length = sizeof(ze_prox_vector_t);
+	}
+	else if (event.type == ASENSOR_TYPE_LIGHT) {
+		c->sensor = ASENSOR_TYPE_LIGHT;
+		ze_light_vector_t *temp = malloc(sizeof(ze_light_vector_t));
+		if (temp==NULL) return NULL;
+		memset(temp, 0, sizeof(ze_light_vector_t));
+		sprintf(temp->light, "%e", event.light);
+		c->data = temp;
+		c->length = sizeof(ze_light_vector_t);
+	}
+	else if (event.type == ZESENSE_SENSOR_TYPE_ORIENTATION) {
+		c->sensor = ZESENSE_SENSOR_TYPE_ORIENTATION;
+		ze_orient_vector_t *temp = malloc(sizeof(ze_orient_vector_t));
+		if (temp==NULL) return NULL;
+		memset(temp, 0, sizeof(ze_orient_vector_t));
+		sprintf(temp->azimuth, "%e", event.vector.azimuth);
+		sprintf(temp->pitch, "%e", event.vector.pitch);
+		sprintf(temp->roll, "%e", event.vector.roll);
+		c->data = temp;
+		c->length = sizeof(ze_orient_vector_t);
+	}
+	else if (event.type == ASENSOR_TYPE_GYROSCOPE) {
+		c->sensor = ASENSOR_TYPE_GYROSCOPE;
+		ze_gyro_vector_t *temp = malloc(sizeof(ze_gyro_vector_t));
+		if (temp==NULL) return NULL;
+		memset(temp, 0, sizeof(ze_gyro_vector_t));
+		sprintf(temp->x, "%e", event.vector.x);
+		sprintf(temp->y, "%e", event.vector.y);
+		sprintf(temp->z, "%e", event.vector.z);
+		c->data = temp;
+		c->length = sizeof(ze_gyro_vector_t);
 	}
 
 	return c;

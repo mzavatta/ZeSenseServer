@@ -35,6 +35,18 @@ ze_coap_init_resources(coap_context_t *context) {
 	coap_add_resource(context, r);
 	r = NULL;
 
+	r = ze_coap_init_light();
+	coap_add_resource(context, r);
+	r = NULL;
+
+	r = ze_coap_init_orient();
+	coap_add_resource(context, r);
+	r = NULL;
+
+	r = ze_coap_init_gyro();
+	coap_add_resource(context, r);
+	r = NULL;
+
 	/* Other resources to follow... */
 }
 
@@ -197,6 +209,150 @@ proximity_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 	generic_on_unregister(ctx, reg, ASENSOR_TYPE_PROXIMITY);
 }
 
+/*-------------------------------- Light ---------------------------------------------*/
+
+coap_resource_t *
+ze_coap_init_light() {
+
+	LOGI("Initializing light..");
+
+	coap_resource_t *r;
+
+	r = coap_resource_init((unsigned char *)"light", 5, 0);
+	coap_register_handler(r, COAP_REQUEST_GET, light_GET_handler);
+	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
+	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
+
+	/* Need to register on_unregister() handler. */
+	r->on_unregister = &light_on_unregister;
+
+	r->observable = 1;
+
+	/*
+	coap_add_attr(r, (unsigned char *)"ct", 2, (unsigned char *)"0", 1, 0);
+	coap_add_attr(r, (unsigned char *)"title", 5, (unsigned char *)"\"Internal Clock\"", 16, 0);
+	coap_add_attr(r, (unsigned char *)"rt", 2, (unsigned char *)"\"Ticks\"", 7, 0);
+	coap_add_attr(r, (unsigned char *)"if", 2, (unsigned char *)"\"clock\"", 7, 0);
+	*/
+
+	return r;
+}
+
+void
+light_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Recognized light GET request, entered handler!");
+
+	generic_GET_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_LIGHT);
+
+}
+
+void
+light_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+
+
+	LOGI("Light on_unregister entered..");
+
+	generic_on_unregister(ctx, reg, ASENSOR_TYPE_LIGHT);
+}
+
+/*----------------------------------- Orientation --------------------------------------------*/
+coap_resource_t *
+ze_coap_init_orient() {
+
+	LOGI("Initializing orientation..");
+
+	coap_resource_t *r;
+
+	r = coap_resource_init((unsigned char *)"orientation", 11, 0);
+	coap_register_handler(r, COAP_REQUEST_GET, orient_GET_handler);
+	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
+	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
+
+	/* Need to register on_unregister() handler. */
+	r->on_unregister = &orient_on_unregister;
+
+	r->observable = 1;
+
+	/*
+	coap_add_attr(r, (unsigned char *)"ct", 2, (unsigned char *)"0", 1, 0);
+	coap_add_attr(r, (unsigned char *)"title", 5, (unsigned char *)"\"Internal Clock\"", 16, 0);
+	coap_add_attr(r, (unsigned char *)"rt", 2, (unsigned char *)"\"Ticks\"", 7, 0);
+	coap_add_attr(r, (unsigned char *)"if", 2, (unsigned char *)"\"clock\"", 7, 0);
+	*/
+
+	return r;
+}
+
+void
+orient_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Recognized orientation GET request, entered handler!");
+
+	generic_GET_handler(context, resource, peer, request, token, response,
+			ZESENSE_SENSOR_TYPE_ORIENTATION);
+
+}
+
+void
+orient_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+
+	LOGI("Orientation on_unregister entered..");
+
+	generic_on_unregister(ctx, reg, ZESENSE_SENSOR_TYPE_ORIENTATION);
+}
+/*----------------------------------- Gyroscope --------------------------------------------*/
+coap_resource_t *
+ze_coap_init_gyro() {
+
+	LOGI("Initializing gyroscope..");
+
+	coap_resource_t *r;
+
+	r = coap_resource_init((unsigned char *)"gyroscope", 9, 0);
+	coap_register_handler(r, COAP_REQUEST_GET, gyro_GET_handler);
+	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
+	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
+
+	/* Need to register on_unregister() handler. */
+	r->on_unregister = &gyro_on_unregister;
+
+	r->observable = 1;
+
+	/*
+	coap_add_attr(r, (unsigned char *)"ct", 2, (unsigned char *)"0", 1, 0);
+	coap_add_attr(r, (unsigned char *)"title", 5, (unsigned char *)"\"Internal Clock\"", 16, 0);
+	coap_add_attr(r, (unsigned char *)"rt", 2, (unsigned char *)"\"Ticks\"", 7, 0);
+	coap_add_attr(r, (unsigned char *)"if", 2, (unsigned char *)"\"clock\"", 7, 0);
+	*/
+
+	return r;
+}
+
+void
+gyro_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Recognized gyroscope GET request, entered handler!");
+
+	generic_GET_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_GYROSCOPE);
+
+}
+
+void
+gyro_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
+
+	LOGI("Gyroscope on_unregister entered..");
+
+	generic_on_unregister(ctx, reg, ASENSOR_TYPE_GYROSCOPE);
+}
 /*------------------------------- Generics -----------------------------------------------*/
 void
 generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,

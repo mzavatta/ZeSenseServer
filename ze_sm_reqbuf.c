@@ -54,7 +54,6 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
 int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 		ticket_t ticket, int freq) {
 
-	LOGI("SM buffer PUT invoked");
 
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= SM_RBUF_SIZE) { //full (greater shall not happen)

@@ -1174,19 +1174,19 @@ form_sm_packet(ASensorEvent event) {
  * on them will most likely not be atomic.
  */
 ASensorEvent read_last_event_SYN(ze_sensor_t *sensor) {
-	LOGW("Reading last event..");
+	//LOGW("Reading last event..");
 	pthread_mutex_lock(&(sensor->carrthrmtx));
 		ASensorEvent ev = sensor->event_cache;
 	pthread_mutex_unlock(&(sensor->carrthrmtx));
-	LOGW("Mutex released");
+	//LOGW("Mutex released");
 	return ev;
 }
 int write_last_event_SYN(ze_sensor_t *sensor, ASensorEvent ev) {
-	LOGW("Writing last event..");
+	//LOGW("Writing last event..");
 	pthread_mutex_lock(&(sensor->carrthrmtx));
 		sensor->event_cache = ev;
 	pthread_mutex_unlock(&(sensor->carrthrmtx));
-	LOGW("Mutex released");
+	//LOGW("Mutex released");
 	return 1;
 }
 

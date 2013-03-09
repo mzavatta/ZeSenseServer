@@ -79,8 +79,6 @@ int put_coap_buf_item(ze_sm_response_buf_t *buf, int rtype,
 
 	struct timespec abstimeout;
 
-	LOGI("CoAP buffer PUT invoked");
-
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= COAP_RBUF_SIZE) { //full (greater shall not happen)
 			foundfull = 1;

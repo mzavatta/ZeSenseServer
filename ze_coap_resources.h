@@ -28,6 +28,7 @@
 
 void ze_coap_init_resources(coap_context_t *context);
 
+int accel_rr_received;
 
 /*--------- Accelerometer --------------------------------------------------*/
 coap_resource_t *

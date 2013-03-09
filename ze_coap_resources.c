@@ -16,8 +16,13 @@
 #include "ze_streaming_manager.h"
 #include "async.h"
 
+
+
 void
 ze_coap_init_resources(coap_context_t *context) {
+
+	accel_rr_received = 0;
+
 
 	LOGI("Initializing resources..");
 
@@ -97,6 +102,10 @@ accel_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response) {
 
+	LOGI("Received accelerometer POST request");
+
+	accel_rr_received++;
+
 	generic_POST_handler(context, resource, peer, request, token, response,
 			ASENSOR_TYPE_ACCELEROMETER);
 
@@ -105,7 +114,7 @@ accel_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
 void
 accel_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
-	LOGI("Proximity on_unregister entered..");
+	LOGI("Accelerometer on_unregister entered..");
 
 	generic_on_unregister(ctx, reg, ASENSOR_TYPE_ACCELEROMETER);
 }
@@ -377,7 +386,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 
 		if (resource->observable == 1) {
 
-			LOGI("Observe option seen and resource observable.");
+			LOGI("Observe request and resource observable");
 
 			/* The returned pointer is either a new pointer or an
 			 * existing one. The reference counter is not incremented
@@ -425,7 +434,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 		}
 		else {
 
-			LOGI("Observe option seen but resource unobservable.");
+			LOGI("Observe request but resource not observable, interpret as normal request.");
 
 			/* As from draft-coap-observe par4.1 suggestion "unable or unwilling",
 			 * ask one-shot representation to SM.
@@ -445,7 +454,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 
 	else { //There isn't an observe option
 
-		LOGI("No observe option is seen, simple oneshot request..");
+		LOGI("Simple oneshot request");
 
 		/* Ask a regular oneshot representation. */
 		asy = coap_register_async(context, peer, request,
@@ -460,9 +469,10 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 		 * It's the resource-specific on_unregister()'s duty.
 		 */
 		reg = coap_find_registration(resource, peer);
-		if (reg != NULL)
+		if (reg != NULL) {
+			LOGI("Resource was being observed by this client, unregistering");
 			resource->on_unregister(context, reg);
-		else LOGI("No registration found though.");
+		}
 	}
 
 	return;
@@ -473,7 +483,7 @@ generic_POST_handler (coap_context_t  *context, struct coap_resource_t *resource
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response,
 	      int sensor) {
-	LOGI("Got POST!!");
+
 }
 
 

@@ -18,6 +18,7 @@
 #include "resource.h"
 #include "ze_timing.h"
 #include "ze_coap_payload.h"
+#include "ze_coap_resources.h"
 
 ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
 ze_payload_t* form_sr_payload(coap_registration_t *reg);
@@ -126,7 +127,7 @@ ze_coap_server_core_thread(void *args) {
 			perror("select");
 	} else if ( result > 0 ) {	/* read from socket */
 		if ( FD_ISSET( cctx->sockfd, &readfds ) ) {
-			LOGI("CS Something appeared on the socket, start reading..");
+			LOGI("Server layer received data from socket");
 			coap_read( cctx );	/* read received data */
 			coap_dispatch( cctx );	/* and dispatch PDUs from receivequeue */
 		}
@@ -151,7 +152,7 @@ ze_coap_server_core_thread(void *args) {
 	 */
 
 	if (req.rtype == STREAM_STOPPED) {
-		LOGI("CS Got a STREAM STOPPED command");
+		LOGI("Server layer got a STREAM STOPPED command");
 
 		reg = (coap_registration_t *)(req.ticket);
 
@@ -164,7 +165,7 @@ ze_coap_server_core_thread(void *args) {
 		coap_registration_release(res, reg);
 	}
 	else if (req.rtype == ONESHOT) {
-		LOGI("CS Got a SEND ASYNCH command");
+		LOGI("Server layer got a SEND ASYNCH command");
 		/* Lookup in the async register using the ticket tid..
 		 * it shall find it..
 		 */
@@ -182,28 +183,28 @@ ze_coap_server_core_thread(void *args) {
 
 			/* Send message. */
 			if (req.conf == COAP_MESSAGE_CON) {
-				LOGI("CS Sending confirmable message");
+				LOGI("Server layer sending CON simple message");
 				coap_send_confirmed(cctx, &(asy->peer), pdu);
 			}
 			else if (req.conf == COAP_MESSAGE_NON) {
-				LOGI("CS Sending non confirmable message");
+				LOGI("Server layer ending NON simple message");
 				coap_send(cctx, &(asy->peer), pdu);
 				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
 				//free(pyl);
 			}
-			else LOGW("CS could not understand message type");
+			else LOGW("Server layer could not understand message type");
 
 			/* Asynchronous request satisfied, regardless of whether
 			 * a CON and an ACK will arrive, remove it. */
 			coap_remove_async(cctx, asy->id, &tmp);
 		}
-		else LOGW("CS Got oneshot sample but no asynch request matches the ticket");
+		else LOGW("Server layer got oneshot sample but no asynch request matches the ticket");
 
 		free(pyl->data);
 		free(pyl);
 	}
 	else if (req.rtype == STREAM_NOTIFICATION) {
-		LOGI("CS Got a SEND NOTIF command");
+		LOGI("Server layer got a SEND NOTIF command");
 
 		reg = (coap_registration_t *)(req.ticket);
 
@@ -245,7 +246,7 @@ ze_coap_server_core_thread(void *args) {
 				 * we explicitly requested a CON.
 				 * Send a CON and clean the NON counter
 				 */
-				LOGI("CS Sending confirmable notification");
+				LOGI("Server layer sending CON notification");
 				pdu->hdr->type = COAP_MESSAGE_CON;
 				coap_notify_confirmed(cctx, &(reg->subscriber), pdu,
 						coap_registration_checkout(reg) );
@@ -257,7 +258,7 @@ ze_coap_server_core_thread(void *args) {
 				 * and increase the NON counter
 				 * no need to keep the transaction state
 				 */
-				LOGI("CS Sending non confirmable notification");
+				LOGI("Server layer sending NON notification");
 				coap_send(cctx, &(reg->subscriber), pdu);
 
 				reg->non_cnt++;
@@ -268,13 +269,13 @@ ze_coap_server_core_thread(void *args) {
 			}
 			else {
 				sent = 0;
-				LOGW("CS Could not understand message type.");
+				LOGW("Server layer could not understand message type.");
 			}
 
 			if(sent) {
 				reg->notcnt++; //notcnt and packcount are not the same!, notcnt has a random start!
 				reg->packcount++;
-				reg->octcount+=pyl->length; //following RTP, only payload octects accounted
+				reg->octcount+=pyl->length; //following RTP's RFC, only payload octects accounted
 
 				/* May be time to send an RTCP packet..
 				 * either bw threshold reached or first notification
@@ -332,7 +333,7 @@ ze_coap_server_core_thread(void *args) {
 		//foundempty = 1;
 	}
 	else {
-		LOGW("CS Cannot interpret SM request type");
+		LOGW("Server layer cannot interpret upper layer command");
 		exit(1);
 	}
 
@@ -351,6 +352,7 @@ ze_coap_server_core_thread(void *args) {
 
 	} /*-----------------------------------------------------------------*/
 
+	LOGI("Total number of accel RR received:%d", accel_rr_received);
 	LOGI("CoAP server out of thread loop, returning..");
 }
 
@@ -433,7 +435,7 @@ form_sr_payload(coap_registration_t *reg) {
 	int ntpdiff = ntpc - reg->ntptwin;
 	double ratio = (double)RTP_TSCLOCK_FREQ/1000000000LL;
 	int rtpinc = (ratio)*(ntpdiff);
-	LOGI("ntp=%lld, ntptwin=%lld, ntpdiff=%d, rtpinc=%d", ntpc, reg->ntptwin, ntpdiff, rtpinc);
+	LOGI("Sender report ntp=%lld, ntptwin=%lld, ntpdiff=%d, rtpinc=%d", ntpc, reg->ntptwin, ntpdiff, rtpinc);
 	int ts = htonl(reg->rtptwin+rtpinc);
 	int oc = htonl(reg->octcount);
 	int pc = htonl(reg->packcount);

@@ -49,6 +49,8 @@
 #define SERVER_IP "192.168.43.1"	//Wifi hotspot interface
 //#define SERVER_IP "10.0.2.15" 	//Android emulator interface
 #define SERVER_PORT "5683"
+#define SERVER_PORT_TEST "5684"
+#define DEST_PORT_TEST 48226
 
 /* Structures to wrap parameters for threads.*/
 struct sm_thread_args {

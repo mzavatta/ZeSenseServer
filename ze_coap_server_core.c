@@ -19,14 +19,16 @@
 #include "ze_timing.h"
 #include "ze_coap_payload.h"
 #include "ze_coap_resources.h"
+#include "uthash.h"
+#include "utlist.h"
 
 ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
 ze_payload_t* form_sr_payload(coap_registration_t *reg);
 uint64_t htonll(uint64_t value);
-//uint64_t get_ntp();
-
-#define CNAME "android@zesense"
-#define CNAME_LENGTH 15
+coap_tid_t test_socket_send(coap_context_t *context,
+	       const coap_address_t *dst,
+	       coap_pdu_t *pdu);
+size_t s_strscpy(char *dest, const char *src, const size_t len);
 
 void *
 ze_coap_server_core_thread(void *args) {
@@ -57,6 +59,8 @@ ze_coap_server_core_thread(void *args) {
 	/* Switch on, off. */
 	//pthread_exit(NULL);
 
+
+	int firstSRsent = 0;
 
 	fd_set readfds;
 	struct timeval tv, *timeout;
@@ -91,7 +95,7 @@ ze_coap_server_core_thread(void *args) {
 	nextpdu = coap_peek_next( cctx );
 
 	coap_ticks(&now);
-	while ( nextpdu && nextpdu->t <= now ) {
+	while ( nextpdu && nextpdu->t <= now  && !globalexit) {
 		coap_retransmit( cctx, coap_pop_next( cctx ) );
 		nextpdu = coap_peek_next( cctx );
 	}
@@ -141,7 +145,7 @@ ze_coap_server_core_thread(void *args) {
 	/*
 	 * How many times do we listen to SM requests?
 	 */
-	while (smcount < SMREQ_RATIO) {
+	while (smcount < SMREQ_RATIO && !globalexit) {
 
 	/* Start by fetching an SM request and dispatch it
 	 */
@@ -274,14 +278,14 @@ ze_coap_server_core_thread(void *args) {
 
 			if(sent) {
 				reg->notcnt++; //notcnt and packcount are not the same!, notcnt has a random start!
-				reg->packcount++;
+				reg->datapackcount++;
 				reg->octcount+=pyl->length; //following RTP's RFC, only payload octects accounted
 
 				/* May be time to send an RTCP packet..
 				 * either bw threshold reached or first notification
 				 * (need to send an RTCP asap) */
 				if ( reg->octcount > (reg->last_sr_octcount + RTCP_SR_BANDWIDTH_THRESHOLD)
-						|| reg->packcount==1) {
+						|| reg->datapackcount==1) {
 
 					srpyl = form_sr_payload(reg);
 					if (srpyl==NULL)
@@ -296,7 +300,21 @@ ze_coap_server_core_thread(void *args) {
 					coap_add_data(pdu, srpyl->length, srpyl->data);
 
 					reg->last_sr_octcount = reg->octcount;
-					reg->last_sr_packcount = reg->packcount;
+					reg->last_sr_packcount = reg->datapackcount;
+
+					//reg->subscriber->addr->sin->sin_port
+
+					/* For testing purposes, mirror the first sender report
+					 * also on another "link": different source and destination
+					 * ports
+					 */
+					if (firstSRsent == 0) {
+						coap_address_t tempaddr = reg->subscriber;
+						tempaddr.addr.sin.sin_port = htons(DEST_PORT_TEST);
+						LOGW("calling test_socket_send");
+						test_socket_send(cctx, &(tempaddr), pdu);
+						firstSRsent = 1;
+					}
 
 					/* Non confirmable. */
 					coap_send(cctx, &(reg->subscriber), pdu);
@@ -353,6 +371,25 @@ ze_coap_server_core_thread(void *args) {
 	} /*-----------------------------------------------------------------*/
 
 	LOGI("Total number of accel RR received:%d", accel_rr_received);
+
+	coap_resource_t *s, *bku;
+	coap_registration_t *sub;
+	int subi = 1;
+	LOGW("Command queue residual size:%d", notbuf->counter);
+	HASH_ITER(hh, cctx->resources, s, bku) {
+		char t[50];
+		//s_strscpy(t, s->uri.s, s->uri.length);
+		LOGI("Resource:%s", t);
+		if (s->subscribers != NULL) {
+			LL_FOREACH(s->subscribers, sub) {
+				LOGI("Subscription %d", subi);
+				LOGI("Data packet sent:%d", sub->datapackcount);
+				subi++;
+			}
+		}
+		subi = 1;
+	}
+
 	LOGI("CoAP server out of thread loop, returning..");
 }
 
@@ -438,7 +475,7 @@ form_sr_payload(coap_registration_t *reg) {
 	LOGI("Sender report ntp=%lld, ntptwin=%lld, ntpdiff=%d, rtpinc=%d", ntpc, reg->ntptwin, ntpdiff, rtpinc);
 	int ts = htonl(reg->rtptwin+rtpinc);
 	int oc = htonl(reg->octcount);
-	int pc = htonl(reg->packcount);
+	int pc = htonl(reg->datapackcount);
 
 	offset = sizeof(ze_payload_header_t);
 	p = p + offset;
@@ -485,4 +522,45 @@ htonll(uint64_t value) {
 	    	return vd;
 	    }
 	    else return value;
+}
+
+
+coap_tid_t
+test_socket_send(coap_context_t *context,
+	       const coap_address_t *dst,
+	       coap_pdu_t *pdu) {
+
+  ssize_t bytes_written;
+  coap_tid_t id = COAP_INVALID_TID;
+
+  if ( !context || !dst || !pdu )
+    return id;
+
+  bytes_written = sendto( context->sockfdtest, pdu->hdr, pdu->length, 0,
+			  &dst->addr.sa, dst->size);
+
+  if (bytes_written >= 0) {
+	  LOGW("--- Sent packet TEST SOCKET -----------");
+	  //printpdu(pdu);
+	  LOGW("---------------------------");
+    coap_transaction_id(dst, pdu, &id);
+  } else {
+    LOGW("test socket send problem");
+  }
+
+  return id;
+}
+
+size_t
+s_strscpy(char *dest, const char *src, const size_t len)
+{
+    /* Copy the contents from src to dest */
+    size_t i = 0;
+    for(i = 0; i < len; i++)
+    *dest++ = *src++;
+
+    /* Null terminate dest */
+     *dest++ = '\0';
+
+    return i;
 }

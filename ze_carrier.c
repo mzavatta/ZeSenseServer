@@ -41,7 +41,7 @@ ze_carrier_thread(void* args) {
 		int sec = (int)p; //isolate integer part
 		double decpart = p - sec; //isolate decimal part
 		long nsec = decpart * 1000000000LL; //enlarge to 10^9 (need nsec) and cut the rest
-		LOGW("Activating carrier on sensor:%d period p:%f decpart:%f sec:%d, nsec:%ld",
+		LOGW("Carrier loop sensor:%d period p:%f decpart:%f sec:%d, nsec:%ld",
 				sensor->sensor, p, decpart, sec, nsec);
 		//exit(1);
 		struct timespec sleep_time;

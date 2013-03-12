@@ -45,7 +45,7 @@ int get_carrier_event(ze_carriers_queue_t *queue, ASensorEvent *event) {
 
 int put_carrier_event(ze_carriers_queue_t *queue, ASensorEvent event) {
 
-	LOGW("Putting event in Carrier Queue");
+	//LOGW("Putting event in Carrier Queue");
 
 	int return_value = 0;
 

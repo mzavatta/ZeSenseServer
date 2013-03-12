@@ -14,7 +14,8 @@
 #ifndef ZE_COAP_SERVER_CORE_H
 #define ZE_COAP_SERVER_CORE_H
 
-
+#define CNAME "android@zesense"
+#define CNAME_LENGTH 15
 
 #define SMREQ_RATIO				5
 

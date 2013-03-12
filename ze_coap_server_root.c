@@ -47,6 +47,10 @@ get_rtp_context(const char *node, const char *port);
 
 
 int
+open_test_socket(coap_context_t *c, const char *node, const char *port);
+
+
+int
 ze_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 
 #ifdef COAP_SERVER
@@ -100,6 +104,11 @@ ze_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 		return -1;
 	LOGI("Root, got cctx");
 #endif
+
+
+	LOGI("Opening test socket");
+	/* Open test socket */
+	open_test_socket(cctx, SERVER_IP, SERVER_PORT_TEST);
 
 	stream_context_t *smctx = NULL;
 	smctx = get_streaming_manager(/*may want to parametrize*/);
@@ -376,3 +385,69 @@ get_rtp_context(const char *node, const char *port) {
   return ctx;
 }
 #endif
+
+
+int
+open_test_socket(coap_context_t *c, const char *node, const char *port) {
+
+		int s;
+	  struct addrinfo hints;
+	  struct addrinfo *result, *rp;
+
+	  memset(&hints, 0, sizeof(struct addrinfo));
+	  hints.ai_family = AF_UNSPEC;
+	  hints.ai_socktype = SOCK_DGRAM;
+	  hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+
+	  s = getaddrinfo(node, port, &hints, &result);
+	  if ( s != 0 ) {
+	    LOGW("getaddrinfo: %s\n", gai_strerror(s));
+	    return NULL;
+	  }
+
+	  coap_address_t addr;
+	  /* iterate through results until success */
+	  for (rp = result; rp != NULL; rp = rp->ai_next) {
+	    if (rp->ai_addrlen <= sizeof(addr.addr)) {
+	      coap_address_init(&addr);
+	      addr.size = rp->ai_addrlen;
+	      memcpy(&addr.addr, rp->ai_addr, rp->ai_addrlen);
+	      break;
+	    }
+	  }
+
+
+	  freeaddrinfo(result);
+
+	  coap_address_t *listen_addr = &addr;
+
+  int reuse = 1;
+
+  if (!listen_addr) {
+    LOGW("listen address empty");
+  }
+
+  c->sockfdtest = socket(listen_addr->addr.sa.sa_family, SOCK_DGRAM, 0);
+  if ( c->sockfdtest < 0 ) {
+    LOGW("cannot create test socket");
+    goto onerror;
+  }
+
+  if ( setsockopt( c->sockfdtest, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse) ) < 0 ) {
+	    LOGW("testsocket problem with socket options");
+  }
+
+  if (bind(c->sockfdtest, &listen_addr->addr.sa, listen_addr->size) < 0) {
+    LOGW("test socket problem bind");
+    goto onerror;
+  }
+
+
+  return 1;
+
+ onerror:
+  if ( c->sockfdtest >= 0 )
+    close ( c->sockfdtest );
+
+}
+

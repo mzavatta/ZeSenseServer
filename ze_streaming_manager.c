@@ -77,6 +77,8 @@ int64_t orient_periods[NUM_SAMPLES];
 struct zs_ASensorEvent gyro_events_list[NUM_SAMPLES];
 int64_t gyro_periods[NUM_SAMPLES];
 
+
+
 void *
 ze_coap_streaming_thread(void* args) {
 
@@ -443,6 +445,9 @@ ze_coap_streaming_thread(void* args) {
 					put_coap_helper(notbuf, STREAM_NOTIFICATION,
 							stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 
+
+					stream->samples_sent++;
+
 					//stream->last_sn++; moved to the coap level (packet based,
 					//not sample based)
 
@@ -512,6 +517,7 @@ ze_coap_streaming_thread(void* args) {
 	} /*thread loop end*/
 
 
+	LOGW("-- Actual sampling frequency stats ----");
 	int k;
 	int accel_max_period = 0, accel_min_period = 0;
 	for (k=0; k<accel_samples_taken-1; k++) {
@@ -587,6 +593,21 @@ ze_coap_streaming_thread(void* args) {
 	double gyro_average = ((double)gyro_incsum)/(gyro_samples_taken-1);
 	LOGW("Gyro periods average %e, max:%e, min:%e", gyro_average,
 			(double)gyro_max_period, (double)gyro_min_period);
+
+
+	LOGW("-- I/O stats ----");
+	ze_stream_t *sf;
+	int si = 1;
+	LOGW("-- Accelerometer");
+	LL_FOREACH(mngr->sensors[ASENSOR_TYPE_ACCELEROMETER].streams, sf) {
+		LOGW("Stream %d", si);
+		LOGW("Samples sent:%d", sf->samples_sent);
+		si++;
+	}
+	si = 1;
+
+
+
 
 	/*
 	 * TODO: Turn off all sensors that might still be active!
@@ -695,6 +716,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	newstream->freq = freq;
 	newstream->last_rtpts = (rand() % 100)+400;
 	newstream->last_wts = 0;
+	newstream->samples_sent = 0;
 	/* TODO randomize rtpts since its first assignment
 	 */
 

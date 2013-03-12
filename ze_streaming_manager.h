@@ -137,6 +137,10 @@ typedef struct ze_stream_t {
 	uint64_t last_wts;	//Last wallclock timestamp
 	int last_rtpts;	//Last RTP timestamp
 	int freq_div;	//Frequency divider
+
+	/* Samples sent. */
+	int samples_sent;
+
 } ze_stream_t;
 
 typedef struct ze_sensor_t {

@@ -422,7 +422,8 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 				 * the response that is passed back to the caller
 				 * is discarded. (my modification to libcoap)
 				 */
-				response = NULL;
+				//coap_delete_pdu(response);
+				//response = NULL;
 			}
 
 			/*

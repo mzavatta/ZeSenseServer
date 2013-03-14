@@ -1174,7 +1174,7 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 	if (c==NULL) return NULL;
 	memset(c, 0, sizeof(ze_sm_packet_t));
 
-	c->rtpts = 0;
+	c->rtpts = rtpts[0];
 	c->ntpts = event[0].timestamp;
 
 	int totlength = 0;

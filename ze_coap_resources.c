@@ -22,6 +22,11 @@ void
 ze_coap_init_resources(coap_context_t *context) {
 
 	accel_rr_received = 0;
+	prox_rr_received = 0;
+	light_rr_received = 0;
+	gyro_rr_received = 0;
+	location_rr_received = 0;
+	orient_rr_received = 0;
 
 
 	LOGI("Initializing resources..");
@@ -108,7 +113,6 @@ accel_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
 
 	generic_POST_handler(context, resource, peer, request, token, response,
 			ASENSOR_TYPE_ACCELEROMETER);
-
 }
 
 void
@@ -161,6 +165,19 @@ location_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 }
 
 void
+location_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Received location POST request");
+
+	location_rr_received++;
+
+	generic_POST_handler(context, resource, peer, request, token, response,
+			ZESENSE_SENSOR_TYPE_LOCATION);
+}
+
+void
 location_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
 	LOGI("Location on_unregister entered..");
@@ -207,6 +224,19 @@ proximity_GET_handler(coap_context_t  *context, struct coap_resource_t *resource
 	generic_GET_handler(context, resource, peer, request, token, response,
 			ASENSOR_TYPE_PROXIMITY);
 
+}
+
+void
+proximity_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Received proximity POST request");
+
+	prox_rr_received++;
+
+	generic_POST_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_PROXIMITY);
 }
 
 void
@@ -260,6 +290,19 @@ light_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 }
 
 void
+light_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Received light POST request");
+
+	light_rr_received++;
+
+	generic_POST_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_LIGHT);
+}
+
+void
 light_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
 
@@ -309,6 +352,19 @@ orient_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 }
 
 void
+orient_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Received orient POST request");
+
+	orient_rr_received++;
+
+	generic_POST_handler(context, resource, peer, request, token, response,
+			ZESENSE_SENSOR_TYPE_ORIENTATION);
+}
+
+void
 orient_on_unregister(coap_context_t *ctx, coap_registration_t *reg) {
 
 	LOGI("Orientation on_unregister entered..");
@@ -353,6 +409,19 @@ gyro_GET_handler(coap_context_t  *context, struct coap_resource_t *resource,
 	generic_GET_handler(context, resource, peer, request, token, response,
 			ASENSOR_TYPE_GYROSCOPE);
 
+}
+
+void
+gyro_POST_handler(coap_context_t  *context, struct coap_resource_t *resource,
+	      coap_address_t *peer, coap_pdu_t *request, str *token,
+	      coap_pdu_t *response) {
+
+	LOGI("Received gyro POST request");
+
+	gyro_rr_received++;
+
+	generic_POST_handler(context, resource, peer, request, token, response,
+			ASENSOR_TYPE_GYROSCOPE);
 }
 
 void

@@ -77,7 +77,7 @@ ze_coap_server_core_thread(void *args) {
 
 	coap_registration_t *reg;
 
-	ze_payload_t *pyl = NULL, *srpyl = NULL;
+	ze_payload_t /**pyl = NULL, */*srpyl = NULL;
 
 
 	while (!globalexit) { /*---------------------------------------------*/
@@ -177,13 +177,14 @@ ze_coap_server_core_thread(void *args) {
 		asy = coap_find_async(cctx, tid);
 		if (asy != NULL) {
 
-			pyl = form_data_payload(reqpacket);
+			//pyl = form_data_payload(reqpacket);
 
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
 			coap_add_option(pdu, COAP_OPTION_TOKEN, asy->tokenlen, asy->token);
-			coap_add_data(pdu, pyl->length, pyl->data);
+			//coap_add_data(pdu, pyl->length, pyl->data);
+			coap_add_data(pdu, reqpacket->length, reqpacket->data);
 
 			/* Send message. */
 			if (req.conf == COAP_MESSAGE_CON) {
@@ -204,8 +205,8 @@ ze_coap_server_core_thread(void *args) {
 		}
 		else LOGW("Server layer got oneshot sample but no asynch request matches the ticket");
 
-		free(pyl->data);
-		free(pyl);
+		//free(pyl->data);
+		//free(pyl);
 	}
 	else if (req.rtype == STREAM_NOTIFICATION) {
 		LOGI("Server layer got a SEND NOTIF command");
@@ -233,7 +234,7 @@ ze_coap_server_core_thread(void *args) {
 			reg->ntptwin = reqpacket->ntpts;
 			reg->rtptwin = reqpacket->rtpts;
 
-			pyl = form_data_payload(reqpacket);
+			//pyl = form_data_payload(reqpacket);
 
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
@@ -242,7 +243,8 @@ ze_coap_server_core_thread(void *args) {
 			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(st));
 			coap_add_option(pdu, COAP_OPTION_TOKEN, reg->token_length, reg->token);
 			//coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
-			coap_add_data(pdu, pyl->length, pyl->data);
+			//coap_add_data(pdu, pyl->length, pyl->data);
+			coap_add_data(pdu, reqpacket->length, reqpacket->data);
 
 			int sent = 1;
 			if (reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
@@ -279,7 +281,8 @@ ze_coap_server_core_thread(void *args) {
 			if(sent) {
 				reg->notcnt++; //notcnt and packcount are not the same!, notcnt has a random start!
 				reg->datapackcount++;
-				reg->octcount+=pyl->length; //following RTP's RFC, only payload octects accounted
+				//reg->octcount+=pyl->length; //following RTP's RFC, only payload octects accounted
+				reg->octcount+=reqpacket->length; //following RTP's RFC, only payload octects accounted
 
 				/* May be time to send an RTCP packet..
 				 * either bw threshold reached or first notification
@@ -305,8 +308,10 @@ ze_coap_server_core_thread(void *args) {
 					//reg->subscriber->addr->sin->sin_port
 
 					/* For testing purposes, mirror the first sender report
-					 * also on another "link": different source and destination
-					 * ports
+					 * also on another "link" (different source and destination
+					 * ports). The other link experiences always the average delay
+					 * while the original link experiences variable delay around
+					 * that average.
 					 */
 					if (firstSRsent == 0) {
 						coap_address_t tempaddr = reg->subscriber;
@@ -341,8 +346,8 @@ ze_coap_server_core_thread(void *args) {
 		 * coap_add_data(pdu, pyl ..) makes a copy,
 		 * so free them in any case.
 		 */
-		free(pyl->data);
-		free(pyl);
+		//free(pyl->data);
+		//free(pyl);
 	}
 	else if (req.rtype == INVALID_COMMAND) {
 		/* Buffer's empty, do not loop any more times,

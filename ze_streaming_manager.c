@@ -23,7 +23,10 @@ typedef struct sm_req_internal_t {
 	ze_sm_request_t req;
 } sm_req_internal_t;
 
-ze_sm_packet_t* form_sm_packet(ASensorEvent event);
+//ze_sm_packet_t* form_sm_packet(ASensorEvent event);
+ze_sm_packet_t *
+encode(ASensorEvent *event, int *rtpts, int num);
+
 
 struct generic_carr_thread_args pcargs; //proximity carrier thread args
 struct generic_carr_thread_args ocargs; //orientation carrier thread args
@@ -216,6 +219,9 @@ ze_coap_streaming_thread(void* args) {
 	/* Internal anti-deadlock mini queue. */
 	sm_req_internal_t *adqueue = NULL;
 
+	/* Fake timestamp to pass to encoder when sending oneshots. */
+	int fakets = 0;
+
 	int accel_counter = 0, accel_samples_taken = 0;
 	int orient_counter = 0, orient_samples_taken = 0;
 	int light_counter = 0, light_samples_taken = 0;
@@ -261,7 +267,8 @@ ze_coap_streaming_thread(void* args) {
 
 				event = mngr->sensors[sm_req.sensor].event_cache;
 				//pyl = form_data_payload(event);
-				pk = form_sm_packet(event);
+				//pk = form_sm_packet(event);
+				pk = encode(&event, &fakets, 1);
 
 				/* Mirror the received request in the sender's interface
 				 * attaching the payload. Do not free pyl because not it
@@ -398,7 +405,9 @@ ze_coap_streaming_thread(void* args) {
 
 					/* Allocate a new payload. */
 					//pyl = form_data_payload(event);
-					pk = form_sm_packet(event);
+					//pk = form_sm_packet(event);
+					pk = encode(&event, &fakets, 1);
+
 					/* Take first element. */
 					osreq = mngr->sensors[event.type].oneshots;
 					/* Use its ticket to send the sample */
@@ -430,26 +439,55 @@ ze_coap_streaming_thread(void* args) {
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
 
-					pk = form_sm_packet(event);
 
-					int correction_factor = 0;
-					/*if (event.type == ZESENSE_SENSOR_TYPE_ORIENTATION)
-						correction_factor = 20;
-					else correction_factor = 0;*/
+					if (stream->event_buffer_level < SOURCE_BUFFER_SIZE) {
 
-					pk->rtpts = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
-						+correction_factor;
-					stream->last_rtpts = pk->rtpts;
-					stream->last_wts = event.timestamp;
+						/* Save the sample in the buffer. */
+						stream->event_buffer[stream->event_buffer_level] = event;
 
-					put_coap_helper(notbuf, STREAM_NOTIFICATION,
-							stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
+						/* Compute the timestamp of the sample. */
+						int correction_factor = 0;
+						int tsa = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
+								+correction_factor;
+						stream->event_rtpts_buffer[stream->event_buffer_level] = tsa;
 
+						/* Update the timestamp references. */
+						stream->last_rtpts = tsa;
+						stream->last_wts = event.timestamp;
 
-					stream->samples_sent++;
+						//stream->last_sn++; moved to the coap level (packet based,
+						//not sample based)
 
-					//stream->last_sn++; moved to the coap level (packet based,
-					//not sample based)
+						/* A new sample has been added, increase index. */
+						stream->event_buffer_level++;
+					}
+
+					/* When the buffer is full, send the bundle. */
+					if (stream->event_buffer_level == SOURCE_BUFFER_SIZE)  {
+
+						LOGW("Send buffer full at:%d", stream->event_buffer_level);
+
+						//pk = form_sm_packet(event);
+
+						//int correction_factor = 0;
+						//pk->rtpts = ;
+
+						//int encodertpts = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
+						//				+correction_factor;
+						pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
+
+						//stream->last_rtpts = pk->rtpts;
+						//stream->last_wts = event.timestamp;
+
+						put_coap_helper(notbuf, STREAM_NOTIFICATION,
+								stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
+
+						/* We sent as many samples as there were in the buffer. */
+						stream->samples_sent += SOURCE_BUFFER_SIZE;
+
+						/* Buffer contents have been sent, empty it. */
+						stream->event_buffer_level = 0;
+					}
 
 					stream = stream->next;
 				}
@@ -859,6 +897,8 @@ ze_stream_t *sm_new_stream() {
 
 	new->next = NULL;
 
+	new->event_buffer_level = 0;
+
 	return new;
 }
 
@@ -1125,6 +1165,220 @@ int android_sensor_turnoff(stream_context_t *mngr, int sensor) {
 }*/
 
 
+/* Event and rtpts are assumed to be arrays of size num,
+ * events in the array are expected to come from the same sensor. */
+ze_sm_packet_t *
+encode(ASensorEvent *event, int *rtpts, int num) {
+
+	ze_sm_packet_t *c = malloc(sizeof(ze_sm_packet_t));
+	if (c==NULL) return NULL;
+	memset(c, 0, sizeof(ze_sm_packet_t));
+
+	c->rtpts = 0;
+	c->ntpts = event[0].timestamp;
+
+	int totlength = 0;
+	int offset = 0;
+	int k = 0;
+	int ts = 0;
+
+	if (event[0].type == ASENSOR_TYPE_ACCELEROMETER) {
+		c->sensor = ASENSOR_TYPE_ACCELEROMETER;
+
+		totlength = sizeof(ze_payload_header_t)+
+				num*(sizeof(int)+sizeof(ze_accel_vector_t));
+		ze_payload_header_t *temp = malloc(totlength);
+		if (temp==NULL) return NULL;
+		memset(temp, 0, totlength);
+
+		temp->packet_type = DATAPOINT;
+		temp->sensor_type = event[0].type;
+		temp->length = htons(totlength);
+
+		offset += sizeof(ze_payload_header_t);
+		unsigned char *p = (unsigned char *)temp;
+
+		for (k=0; k<num; k++) {
+			ts = htonl(rtpts[k]);
+			memcpy(p+offset, &ts, sizeof(int));
+			offset += sizeof(int);
+			sprintf(p+offset, "%e", event[k].acceleration.x);
+			offset += CHARLEN;
+			sprintf(p+offset, "%e", event[k].acceleration.y);
+			offset += CHARLEN;
+			sprintf(p+offset, "%e", event[k].acceleration.z);
+			offset += CHARLEN;
+		}
+
+		c->data = temp;
+		c->length = totlength;
+	}
+	if (event[0].type == ASENSOR_TYPE_PROXIMITY) {
+		c->sensor = ASENSOR_TYPE_PROXIMITY;
+
+		totlength = sizeof(ze_payload_header_t)+
+				num*(sizeof(int)+sizeof(ze_prox_vector_t));
+		ze_payload_header_t *temp = malloc(totlength);
+		if (temp==NULL) return NULL;
+		memset(temp, 0, totlength);
+
+		temp->packet_type = DATAPOINT;
+		temp->sensor_type = event[0].type;
+		temp->length = htons(totlength);
+
+		offset += sizeof(ze_payload_header_t);
+		unsigned char *p = (unsigned char *)temp;
+
+		for (k=0; k<num; k++) {
+			ts = htonl(rtpts[k]);
+			memcpy(p+offset, &ts, sizeof(int));
+			offset += sizeof(int);
+			sprintf(p+offset, "%e", event[k].distance);
+			offset += CHARLEN;
+		}
+
+		c->data = temp;
+		c->length = totlength;
+	}
+	if (event[0].type == ASENSOR_TYPE_LIGHT) {
+		c->sensor = ASENSOR_TYPE_LIGHT;
+
+		totlength = sizeof(ze_payload_header_t)+
+				num*(sizeof(int)+sizeof(ze_light_vector_t));
+		ze_payload_header_t *temp = malloc(totlength);
+		if (temp==NULL) return NULL;
+		memset(temp, 0, totlength);
+
+		temp->packet_type = DATAPOINT;
+		temp->sensor_type = event[0].type;
+		temp->length = htons(totlength);
+
+		offset += sizeof(ze_payload_header_t);
+		unsigned char *p = (unsigned char *)temp;
+
+		for (k=0; k<num; k++) {
+			ts = htonl(rtpts[k]);
+			memcpy(p+offset, &ts, sizeof(int));
+			offset += sizeof(int);
+			sprintf(p+offset, "%e", event[k].light);
+			offset += CHARLEN;
+		}
+
+		c->data = temp;
+		c->length = totlength;
+	}
+	if (event[0].type == ZESENSE_SENSOR_TYPE_ORIENTATION) {
+		c->sensor = ZESENSE_SENSOR_TYPE_ORIENTATION;
+
+		totlength = sizeof(ze_payload_header_t)+
+				num*(sizeof(int)+sizeof(ze_orient_vector_t));
+		ze_payload_header_t *temp = malloc(totlength);
+		if (temp==NULL) return NULL;
+		memset(temp, 0, totlength);
+
+		temp->packet_type = DATAPOINT;
+		temp->sensor_type = event[0].type;
+		temp->length = htons(totlength);
+
+		offset += sizeof(ze_payload_header_t);
+		unsigned char *p = (unsigned char *)temp;
+
+		for (k=0; k<num; k++) {
+			ts = htonl(rtpts[k]);
+			memcpy(p+offset, &ts, sizeof(int));
+			offset += sizeof(int);
+			sprintf(p+offset, "%e", event[k].vector.azimuth);
+			offset += CHARLEN;
+			sprintf(p+offset, "%e", event[k].vector.pitch);
+			offset += CHARLEN;
+			sprintf(p+offset, "%e", event[k].vector.roll);
+			offset += CHARLEN;
+		}
+
+		c->data = temp;
+		c->length = totlength;
+	}
+	if (event[0].type == ASENSOR_TYPE_GYROSCOPE) {
+		c->sensor = ASENSOR_TYPE_GYROSCOPE;
+
+		totlength = sizeof(ze_payload_header_t)+
+				num*(sizeof(int)+sizeof(ze_gyro_vector_t));
+		ze_payload_header_t *temp = malloc(totlength);
+		if (temp==NULL) return NULL;
+		memset(temp, 0, totlength);
+
+		temp->packet_type = DATAPOINT;
+		temp->sensor_type = event[0].type;
+		temp->length = htons(totlength);
+
+		offset += sizeof(ze_payload_header_t);
+		unsigned char *p = (unsigned char *)temp;
+
+		for (k=0; k<num; k++) {
+			ts = htonl(rtpts[k]);
+			memcpy(p+offset, &ts, sizeof(int));
+			offset += sizeof(int);
+			sprintf(p+offset, "%e", event[k].vector.x);
+			offset += CHARLEN;
+			sprintf(p+offset, "%e", event[k].vector.y);
+			offset += CHARLEN;
+			sprintf(p+offset, "%e", event[k].vector.z);
+			offset += CHARLEN;
+		}
+
+		c->data = temp;
+		c->length = totlength;
+	}
+
+
+	return c;
+
+
+}
+
+
+
+
+
+
+
+
+	/*
+	 ze_payload_header_t
+	 timestamp 32bit (int)
+	 packet->data,length
+	 */
+/*
+	ze_payload_t *c = malloc(sizeof(ze_payload_t));
+	if (c==NULL) return NULL;
+
+	int totlength = sizeof(ze_payload_header_t)+sizeof(int)+packet->length;
+	c->data = malloc(totlength);
+	if(c->data == NULL) return NULL;
+	c->length = totlength;
+	memset(c->data, 0, totlength);
+
+	int offset = 0;
+	unsigned char *p = c->data;
+
+	ze_payload_header_t *hdr = (ze_payload_header_t*)(p);
+	hdr->packet_type = DATAPOINT;
+	hdr->sensor_type = packet->sensor;
+	hdr->length = htons(totlength);
+
+	offset = sizeof(ze_payload_header_t);
+	p = p + offset;
+	int rtpts = htonl(packet->rtpts);
+	memcpy(p, &rtpts, sizeof(int));
+
+	offset = sizeof(int);
+	p = p + offset;
+	memcpy(p, packet->data, packet->length);
+
+	return c;
+}*/
+
+/*
 ze_sm_packet_t *
 form_sm_packet(ASensorEvent event) {
 
@@ -1188,7 +1442,7 @@ form_sm_packet(ASensorEvent event) {
 	}
 
 	return c;
-}
+}*/
 
 
 /* We synch access to event_cache and freq because they are

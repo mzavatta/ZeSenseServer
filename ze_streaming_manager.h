@@ -80,6 +80,9 @@ enum {
 /* Streaming Manager settings */
 #define QUEUE_REQ_RATIO		5
 
+/* Source buffer size. */
+#define SOURCE_BUFFER_SIZE 1
+
 /* Other settings, to be moved */
 #define ZE_NUMSENSORS		(14+1) /* +1 in order to use sensor types
 									* as array indexes */
@@ -129,6 +132,15 @@ typedef struct ze_stream_t {
 	 * not anymore, it's managed differently now
 	 */
 	//coap_address_t dest;
+
+	/*
+	 * Event buffer. A packet to the lower layer will be sent
+	 * only when this buffer is full, and the packet bundles
+	 * all the events in this buffer.
+	 */
+	ASensorEvent event_buffer[SOURCE_BUFFER_SIZE];
+	int event_rtpts_buffer[SOURCE_BUFFER_SIZE];
+	int event_buffer_level;
 
 	/* Client specified stream frequency */
 	int freq;

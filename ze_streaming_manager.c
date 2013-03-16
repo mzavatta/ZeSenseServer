@@ -64,7 +64,7 @@ ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *
 
 //void proximity_carrier(int signum); //signal handler for deprecated implementation of carriers
 
-#define NUM_SAMPLES 3000
+#define NUM_SAMPLES 5000
 struct zs_ASensorEvent {
 	int64_t gents; //as it is fed into the event interface
 	int64_t collts; //when we collect it
@@ -480,7 +480,7 @@ ze_coap_streaming_thread(void* args) {
 						//stream->last_wts = event.timestamp;
 
 						put_coap_helper(notbuf, STREAM_NOTIFICATION,
-								stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
+								stream->reg, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
 
 						/* We sent as many samples as there were in the buffer. */
 						stream->samples_sent += SOURCE_BUFFER_SIZE;
@@ -555,7 +555,6 @@ ze_coap_streaming_thread(void* args) {
 	} /*thread loop end*/
 
 
-	LOGW("-- Actual sampling frequency stats ----");
 	int k;
 	int accel_max_period = 0, accel_min_period = 0;
 	for (k=0; k<accel_samples_taken-1; k++) {
@@ -569,8 +568,6 @@ ze_coap_streaming_thread(void* args) {
 		accel_incsum+=accel_periods[k];
 	}
 	double accel_average = ((double)accel_incsum)/(accel_samples_taken-1);
-	LOGW("Accel periods average %e, max:%e, min:%e", accel_average,
-			(double)accel_max_period, (double)accel_min_period);
 
 	int orient_max_period = 0, orient_min_period = 0;
 	for (k=0; k<orient_samples_taken-1; k++) {
@@ -584,8 +581,6 @@ ze_coap_streaming_thread(void* args) {
 		orient_incsum+=orient_periods[k];
 	}
 	double orient_average = ((double)orient_incsum)/(orient_samples_taken-1);
-	LOGW("Orient periods average %e, max:%e, min:%e", orient_average,
-			(double)orient_max_period, (double)orient_min_period);
 
 	int light_max_period = 0, light_min_period = 0;
 	for (k=0; k<light_samples_taken-1; k++) {
@@ -599,8 +594,6 @@ ze_coap_streaming_thread(void* args) {
 		light_incsum+=light_periods[k];
 	}
 	double light_average = ((double)light_incsum)/(light_samples_taken-1);
-	LOGW("Light periods average %e, max:%e, min:%e", light_average,
-			(double)light_max_period, (double)light_min_period);
 
 	int prox_max_period = 0, prox_min_period = 0;
 	for (k=0; k<prox_samples_taken-1; k++) {
@@ -614,8 +607,6 @@ ze_coap_streaming_thread(void* args) {
 		prox_incsum+=prox_periods[k];
 	}
 	double prox_average = ((double)prox_incsum)/(prox_samples_taken-1);
-	LOGW("Prox periods average %e, max:%e, min:%e", prox_average,
-			(double)prox_max_period, (double)prox_min_period);
 
 	int gyro_max_period = 0, gyro_min_period = 0;
 	for (k=0; k<gyro_samples_taken-1; k++) {
@@ -629,23 +620,73 @@ ze_coap_streaming_thread(void* args) {
 		gyro_incsum+=gyro_periods[k];
 	}
 	double gyro_average = ((double)gyro_incsum)/(gyro_samples_taken-1);
+
+pthread_mutex_lock(&lmtx);
+
+	LOGW("-- Streaming Manager stats start ----");
+	sprintf(logstr, "-- Streaming Manager stats start ----\n"); FWRITE
+
+	LOGW("Accel periods average %e, max:%e, min:%e", accel_average,
+			(double)accel_max_period, (double)accel_min_period);
+	LOGW("Orient periods average %e, max:%e, min:%e", orient_average,
+			(double)orient_max_period, (double)orient_min_period);
+	LOGW("Light periods average %e, max:%e, min:%e", light_average,
+			(double)light_max_period, (double)light_min_period);
+	LOGW("Prox periods average %e, max:%e, min:%e", prox_average,
+			(double)prox_max_period, (double)prox_min_period);
 	LOGW("Gyro periods average %e, max:%e, min:%e", gyro_average,
 			(double)gyro_max_period, (double)gyro_min_period);
 
+	sprintf(logstr, "Accel periods average %e, max:%e, min:%e\n", accel_average,
+			(double)accel_max_period, (double)accel_min_period); FWRITE
+	sprintf(logstr, "Orient periods average %e, max:%e, min:%e\n", orient_average,
+			(double)orient_max_period, (double)orient_min_period); FWRITE
+	sprintf(logstr, "Light periods average %e, max:%e, min:%e\n", light_average,
+			(double)light_max_period, (double)light_min_period); FWRITE
+	sprintf(logstr, "Prox periods average %e, max:%e, min:%e\n", prox_average,
+			(double)prox_max_period, (double)prox_min_period); FWRITE
+	sprintf(logstr, "Gyro periods average %e, max:%e, min:%e\n", gyro_average,
+			(double)gyro_max_period, (double)gyro_min_period); FWRITE
 
-	LOGW("-- I/O stats ----");
+
 	ze_stream_t *sf;
 	int si = 1;
-	LOGW("-- Accelerometer");
+	LOGW("-- Start Accelerometer");
 	LL_FOREACH(mngr->sensors[ASENSOR_TYPE_ACCELEROMETER].streams, sf) {
-		LOGW("Stream %d", si);
-		LOGW("Samples sent:%d", sf->samples_sent);
+		LOGW("Accelerometer stream %d, samples sent:%d", si, sf->samples_sent);
+		sprintf(logstr, "Accelerometer stream %d, samples sent:%d\n", si, sf->samples_sent); FWRITE
+		si++;
+	}
+	LOGW("-- End Accelerometer");
+	si = 1;
+	LOGW("-- Start Proximity");
+	LL_FOREACH(mngr->sensors[ASENSOR_TYPE_PROXIMITY].streams, sf) {
+		LOGW("Proximity stream %d, samples sent:%d", si, sf->samples_sent);
+		sprintf(logstr, "Proximity stream %d, samples sent:%d\n", si, sf->samples_sent); FWRITE
 		si++;
 	}
 	si = 1;
+	LOGW("-- End Proximity");
+	LOGW("-- Start Gyroscope");
+	LL_FOREACH(mngr->sensors[ASENSOR_TYPE_GYROSCOPE].streams, sf) {
+		LOGW("Gyroscope stream %d, samples sent:%d", si, sf->samples_sent);
+		sprintf(logstr, "Gyroscope stream %d, samples sent:%d\n", si, sf->samples_sent); FWRITE
+		si++;
+	}
+	si = 1;
+	LOGW("-- End Gyroscope");
+	LOGW("-- Start Light");
+	LL_FOREACH(mngr->sensors[ASENSOR_TYPE_LIGHT].streams, sf) {
+		LOGW("Light stream %d, samples sent:%d", si, sf->samples_sent);
+		sprintf(logstr, "Light stream %d, samples sent:%d\n", si, sf->samples_sent); FWRITE
+		si++;
+	}
+	LOGW("-- End Light");
 
+	LOGW("-- Streaming Manager stats end -----");
+	sprintf(logstr, "-- Streaming Manager stats end -----\n\n"); FWRITE
 
-
+pthread_mutex_unlock(&lmtx);
 
 	/*
 	 * TODO: Turn off all sensors that might still be active!

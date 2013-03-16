@@ -22,6 +22,8 @@
 #include "uthash.h"
 #include "utlist.h"
 
+#include "globals_test.h"
+
 ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
 ze_payload_t* form_sr_payload(coap_registration_t *reg);
 uint64_t htonll(uint64_t value);
@@ -375,25 +377,97 @@ ze_coap_server_core_thread(void *args) {
 
 	} /*-----------------------------------------------------------------*/
 
+pthread_mutex_lock(&lmtx);
 	LOGI("Total number of accel RR received:%d", accel_rr_received);
+
+	LOGW("-- CoAP level stats start ------");
+	sprintf(logstr, "-- CoAP level stats start ------\n"); FWRITE
+
+	LOGW("Command queue residual size:%d", notbuf->counter);
+	sprintf(logstr, "Command queue residual size:%d\n", notbuf->counter); FWRITE
 
 	coap_resource_t *s, *bku;
 	coap_registration_t *sub;
 	int subi = 1;
-	LOGW("Command queue residual size:%d", notbuf->counter);
+
 	HASH_ITER(hh, cctx->resources, s, bku) {
 		char t[50];
-		//s_strscpy(t, s->uri.s, s->uri.length);
-		LOGI("Resource:%s", t);
+		s_strscpy(t, s->uri.s, s->uri.length);
 		if (s->subscribers != NULL) {
 			LL_FOREACH(s->subscribers, sub) {
-				LOGI("Subscription %d", subi);
-				LOGI("Data packet sent:%d", sub->datapackcount);
+				sprintf(logstr, "-- Resource:%s registration:%d\n", t, subi); FWRITE
+				sprintf(logstr, "Data packets sent:%d\n", sub->datapackcount); FWRITE
+				LOGI("-- Resource:%s registration:%d", t, subi);
+				LOGI("Data packets sent:%d", sub->datapackcount);
 				subi++;
 			}
 		}
 		subi = 1;
 	}
+
+	LOGW("Total UDP datagrams sent:%d", UDP_OUT_counter);
+	LOGW("Total UDP payload octects sent:%d", UDP_OUT_octects);
+	LOGW("Total NON messages sent:%d", OUT_NON_counter);
+	LOGW("Total NON octects sent:%d (CoAP hdr incl)", OUT_NON_octects);
+	LOGW("Total CON messages sent:%d", OUT_CON_counter);
+	LOGW("Total CON octects sent:%d (CoAP hdr incl)", OUT_CON_octects);
+	LOGW("Total RST messages sent:%d", OUT_RST_counter);
+	LOGW("Total RST octects sent:%d (CoAP hdr incl)", OUT_RST_octects);
+	LOGW("Total ACK messages sent:%d", OUT_ACK_counter);
+	LOGW("Total ACK octects sent:%d (CoAP hdr incl)", OUT_ACK_octects);
+
+	LOGW("Total UDP datagrams received:%d", UDP_IN_counter);
+	LOGW("Total UDP payload octects received:%d", UDP_IN_octects);
+	LOGW("Total NON messages received:%d", IN_NON_counter);
+	LOGW("Total NON octects received:%d (CoAP hdr incl)", IN_NON_octects);
+	LOGW("Total CON messages received:%d", IN_CON_counter);
+	LOGW("Total CON octects received:%d (CoAP hdr incl)", IN_CON_octects);
+	LOGW("Total RST messages received:%d", IN_RST_counter);
+	LOGW("Total RST octects received:%d (CoAP hdr incl)", IN_RST_octects);
+	LOGW("Total ACK messages received:%d", IN_ACK_counter);
+	LOGW("Total ACK octects received:%d (CoAP hdr incl)", IN_ACK_octects);
+
+    LOGW("Total retransmissions performed:%d", RETR_counter);
+    LOGW("Accel retransmissions:%d", ACCEL_RETR_counter);
+    LOGW("Gyro retransmissions:%d", GYRO_RETR_counter);
+    LOGW("Prox retransmissions:%d", PROX_RETR_counter);
+    LOGW("Light retransmissions:%d", LIGHT_RETR_counter);
+
+    /*----------------------------------------------*/
+
+
+    sprintf(logstr, "UDP datagrams sent:%d\n", UDP_OUT_counter); FWRITE
+    sprintf(logstr, "UDP payload octects sent:%d\n", UDP_OUT_octects); FWRITE
+    sprintf(logstr, "NON messages sent:%d\n", OUT_NON_counter); FWRITE
+    sprintf(logstr, "NON octects sent:%d (CoAP hdr incl)\n", OUT_NON_octects); FWRITE
+    sprintf(logstr, "CON messages sent:%d\n", OUT_CON_counter); FWRITE
+    sprintf(logstr, "CON octects sent:%d (CoAP hdr incl)\n", OUT_CON_octects); FWRITE
+    sprintf(logstr, "RST messages sent:%d\n", OUT_RST_counter); FWRITE
+    sprintf(logstr, "RST octects sent:%d (CoAP hdr incl)\n", OUT_RST_octects); FWRITE
+    sprintf(logstr, "ACK messages sent:%d\n", OUT_ACK_counter); FWRITE
+    sprintf(logstr, "ACK octects sent:%d (CoAP hdr incl)\n", OUT_ACK_octects); FWRITE
+
+    sprintf(logstr, "UDP datagrams received:%d\n", UDP_IN_counter); FWRITE
+    sprintf(logstr, "UDP payload octects received:%d\n", UDP_IN_octects); FWRITE
+    sprintf(logstr, "NON messages received:%d\n", IN_NON_counter); FWRITE
+    sprintf(logstr, "NON octects received:%d (CoAP hdr incl)\n", IN_NON_octects); FWRITE
+    sprintf(logstr, "CON messages received:%d\n", IN_CON_counter); FWRITE
+    sprintf(logstr, "CON octects received:%d (CoAP hdr incl)\n", IN_CON_octects); FWRITE
+    sprintf(logstr, "RST messages received:%d\n", IN_RST_counter); FWRITE
+    sprintf(logstr, "RST octects received:%d (CoAP hdr incl)\n", IN_RST_octects); FWRITE
+    sprintf(logstr, "ACK messages received:%d\n", IN_ACK_counter); FWRITE
+    sprintf(logstr, "ACK octects received:%d (CoAP hdr incl)\n", IN_ACK_octects); FWRITE
+
+    sprintf(logstr, "Total retransmissions performed:%d\n", RETR_counter); FWRITE
+    sprintf(logstr, "Accel retransmissions:%d\n", ACCEL_RETR_counter); FWRITE
+    sprintf(logstr, "Gyro retransmissions:%d\n", GYRO_RETR_counter); FWRITE
+    sprintf(logstr, "Prox retransmissions:%d\n", PROX_RETR_counter); FWRITE
+    sprintf(logstr, "Light retransmissions:%d\n", LIGHT_RETR_counter); FWRITE
+
+	LOGW("-- CoAP level stats end ------");
+	sprintf(logstr, "-- CoAP level stats end ------\n\n"); FWRITE
+
+pthread_mutex_unlock(&lmtx);
 
 	LOGI("CoAP server out of thread loop, returning..");
 }

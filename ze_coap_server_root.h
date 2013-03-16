@@ -52,6 +52,12 @@
 #define SERVER_PORT_TEST "5684"
 #define DEST_PORT_TEST 48226
 
+/* Log file handle. */
+FILE *logfd;
+char logstr[100];
+pthread_mutex_t lmtx;
+#define FWRITE 	if (fputs(logstr, logfd)<0) LOGW("write file failed");
+
 /* Structures to wrap parameters for threads.*/
 struct sm_thread_args {
 	stream_context_t *smctx;

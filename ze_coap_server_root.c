@@ -15,12 +15,7 @@
 #include "ze_coap_server_root.h"
 #include "ze_streaming_manager.h"
 #include "ze_log.h"
-
-
-
-
-/* Log file handle. */
-FILE *logfd;
+#include "globals_test.h"
 
 
 #ifdef COAP_SERVER
@@ -63,6 +58,37 @@ ze_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	//pthread_exit(NULL);
 	//exit(1);
 	//return 1;
+
+	UDP_OUT_counter = 0;
+	UDP_OUT_octects = 0;
+	OUT_NON_counter = 0;
+	OUT_NON_octects = 0;
+	OUT_CON_counter = 0;
+	OUT_CON_octects = 0;
+	OUT_RST_counter = 0;
+	OUT_RST_octects = 0;
+	OUT_ACK_counter = 0;
+	OUT_ACK_octects = 0;
+
+	UDP_IN_counter = 0;
+	UDP_IN_octects = 0;
+	IN_NON_counter = 0;
+	IN_NON_octects = 0;
+	IN_CON_counter = 0;
+	IN_CON_octects = 0;
+	IN_RST_counter = 0;
+	IN_RST_octects = 0;
+	IN_ACK_counter = 0;
+	IN_ACK_octects = 0;
+
+    RETR_counter = 0;
+    ACCEL_RETR_counter = 0;
+    LIGHT_RETR_counter = 0;
+    GYRO_RETR_counter = 0;
+    PROX_RETR_counter = 0;
+
+	Duplicate_Count = 0;
+
 
 	/* Spawn *all* the threads from here, this thread has no other function
 	 * except for fixing in memory, once and forever, the handles (what we
@@ -165,14 +191,19 @@ ze_server_root(JNIEnv* env, jobject thiz, jobject actx) {
     if ( !actxg )
     	LOGW("Root, cannot create global ref for actx");
 
-    /* Open log file. */
+    /* Open log file and its mutex. */
 	char *logpath = ZELOGPATH;
 	logfd = fopen(logpath,"ab");
 	if(logfd == NULL) {
-		LOGW("unable to open %s", logpath);
+		LOGW("Unable to open %s", logpath);
 		return -1;
-	}
-	else LOGI("success opening %s", logpath);
+	} else LOGI("success opening %s", logpath);
+	int lmtxe = pthread_mutex_init(&lmtx, NULL);
+	if (lmtxe)
+		LOGW("Failed to initialize file mtx:%s\n", strerror(lmtxe));
+
+	/* Seed the rand() function. */
+	srand(time(NULL));
 
 #ifdef COAP_SERVER
 	/* Initialize the resource tree. */
@@ -293,6 +324,9 @@ ze_server_root(JNIEnv* env, jobject thiz, jobject actx) {
 	free(smctx);
 	free(smreqbuf);
 	free(notbuf);
+
+    /* Close log file. */
+	fclose(logfd);
 
 	return 1;
 }

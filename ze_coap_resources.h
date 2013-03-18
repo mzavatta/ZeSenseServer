@@ -35,6 +35,7 @@ int light_rr_received;
 int gyro_rr_received;
 int location_rr_received;
 int orient_rr_received;
+int RR_REC_counter;
 
 /*--------- Accelerometer --------------------------------------------------*/
 coap_resource_t *

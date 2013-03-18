@@ -439,13 +439,13 @@ ze_coap_streaming_thread(void* args) {
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
 
-
+#ifndef REPETITION
 					if (stream->event_buffer_level < SOURCE_BUFFER_SIZE) {
 
 						/* Save the sample in the buffer. */
 						stream->event_buffer[stream->event_buffer_level] = event;
 
-						/* Compute the timestamp of the sample. */
+						/* Compute the timestamp of the sample and save it in the buffer. */
 						int correction_factor = 0;
 						int tsa = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
 								+correction_factor;
@@ -455,8 +455,8 @@ ze_coap_streaming_thread(void* args) {
 						stream->last_rtpts = tsa;
 						stream->last_wts = event.timestamp;
 
-						//stream->last_sn++; moved to the coap level (packet based,
-						//not sample based)
+						/* Moved to the protocol level (packet based, not sample based). */
+						//stream->last_sn++;
 
 						/* A new sample has been added, increase index. */
 						stream->event_buffer_level++;
@@ -467,18 +467,10 @@ ze_coap_streaming_thread(void* args) {
 
 						LOGW("Send buffer full at:%d", stream->event_buffer_level);
 
-						//pk = form_sm_packet(event);
-
-						//int correction_factor = 0;
-						//pk->rtpts = ;
-
-						//int encodertpts = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
-						//				+correction_factor;
+						/* Encode packet bundle. */
 						pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
 
-						//stream->last_rtpts = pk->rtpts;
-						//stream->last_wts = event.timestamp;
-
+						/* Deliver command to the protocol layer. */
 						put_coap_helper(notbuf, STREAM_NOTIFICATION,
 								stream->reg, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
 
@@ -488,6 +480,46 @@ ze_coap_streaming_thread(void* args) {
 						/* Buffer contents have been sent, empty it. */
 						stream->event_buffer_level = 0;
 					}
+#else
+/* ATTENTION IT WORKS ONLY WITH SOURCE_BUFFER_SIZE = 2 i.e. REPETITION OF ONE SAMPLE. */
+
+					/* Compute the timestamp of the sample. */
+					int correction_factor = 0;
+					int tsa = (stream->last_rtpts+(RTP_TSCLOCK_FREQ / stream->freq))
+								+correction_factor;
+
+					if (stream->event_buffer_level == 0) {
+
+						/* Save the sample in the buffer's first position. */
+						stream->event_buffer[0] = event;
+						stream->event_rtpts_buffer[0] = tsa;
+
+						/* At least a sample has been added, flag this fact. */
+						stream->event_buffer_level = 1;
+					}
+
+					/* Save the sample in the buffer's second position. */
+					stream->event_buffer[1] = event;
+					stream->event_rtpts_buffer[1] = tsa;
+
+					/* Update the timestamp references. */
+					stream->last_rtpts = tsa;
+					stream->last_wts = event.timestamp;
+
+					/* Encode packet bundle. */
+					pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
+
+					/* Deliver command to the protocol layer. */
+					put_coap_helper(notbuf, STREAM_NOTIFICATION,
+								stream->reg, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
+
+					/* We sent one sample. */
+					stream->samples_sent++;
+
+					/* Backup current sample for repetition in the next round. */
+					stream->event_buffer[0] = event;
+					stream->event_rtpts_buffer[0] = tsa;
+#endif
 
 					stream = stream->next;
 				}

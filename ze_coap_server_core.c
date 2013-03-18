@@ -32,6 +32,8 @@ coap_tid_t test_socket_send(coap_context_t *context,
 	       coap_pdu_t *pdu);
 size_t s_strscpy(char *dest, const char *src, const size_t len);
 
+int SR_SENT_counter;
+
 void *
 ze_coap_server_core_thread(void *args) {
 
@@ -61,7 +63,7 @@ ze_coap_server_core_thread(void *args) {
 	/* Switch on, off. */
 	//pthread_exit(NULL);
 
-
+	SR_SENT_counter = 0;
 	int firstSRsent = 0;
 
 	fd_set readfds;
@@ -323,9 +325,11 @@ ze_coap_server_core_thread(void *args) {
 						firstSRsent = 1;
 					}
 
-					/* Non confirmable. */
-					coap_send(cctx, &(reg->subscriber), pdu);
+					/* -/non/- confirmable. */
+					coap_send_confirmed(cctx, &(reg->subscriber), pdu);
 					// TODO free PDU when the send is a non confirmable one!
+
+					SR_SENT_counter++;
 				}
 			}
 
@@ -378,7 +382,6 @@ ze_coap_server_core_thread(void *args) {
 	} /*-----------------------------------------------------------------*/
 
 pthread_mutex_lock(&lmtx);
-	LOGI("Total number of accel RR received:%d", accel_rr_received);
 
 	LOGW("-- CoAP level stats start ------");
 	sprintf(logstr, "-- CoAP level stats start ------\n"); FWRITE
@@ -396,7 +399,7 @@ pthread_mutex_lock(&lmtx);
 		if (s->subscribers != NULL) {
 			LL_FOREACH(s->subscribers, sub) {
 				sprintf(logstr, "-- Resource:%s registration:%d\n", t, subi); FWRITE
-				sprintf(logstr, "Data packets sent:%d\n", sub->datapackcount); FWRITE
+				sprintf(logstr, "Data packets sent (first time):%d\n", sub->datapackcount); FWRITE
 				LOGI("-- Resource:%s registration:%d", t, subi);
 				LOGI("Data packets sent:%d", sub->datapackcount);
 				subi++;
@@ -426,6 +429,9 @@ pthread_mutex_lock(&lmtx);
 	LOGW("Total RST octects received:%d (CoAP hdr incl)", IN_RST_octects);
 	LOGW("Total ACK messages received:%d", IN_ACK_counter);
 	LOGW("Total ACK octects received:%d (CoAP hdr incl)", IN_ACK_octects);
+
+	LOGW("Total SR sent:%d", SR_SENT_counter);
+	LOGW("Total RR received:%d", RR_REC_counter);
 
     LOGW("Total retransmissions performed:%d", RETR_counter);
     LOGW("Accel retransmissions:%d", ACCEL_RETR_counter);
@@ -457,6 +463,9 @@ pthread_mutex_lock(&lmtx);
     sprintf(logstr, "RST octects received:%d (CoAP hdr incl)\n", IN_RST_octects); FWRITE
     sprintf(logstr, "ACK messages received:%d\n", IN_ACK_counter); FWRITE
     sprintf(logstr, "ACK octects received:%d (CoAP hdr incl)\n", IN_ACK_octects); FWRITE
+
+    sprintf(logstr, "Total SR sent:%d\n", SR_SENT_counter); FWRITE
+    sprintf(logstr, "Total RR received:%d\n", RR_REC_counter); FWRITE
 
     sprintf(logstr, "Total retransmissions performed:%d\n", RETR_counter); FWRITE
     sprintf(logstr, "Accel retransmissions:%d\n", ACCEL_RETR_counter); FWRITE

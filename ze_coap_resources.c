@@ -27,6 +27,7 @@ ze_coap_init_resources(coap_context_t *context) {
 	gyro_rr_received = 0;
 	location_rr_received = 0;
 	orient_rr_received = 0;
+	RR_REC_counter = 0;
 
 
 	LOGI("Initializing resources..");
@@ -134,6 +135,7 @@ ze_coap_init_location() {
 
 	r = coap_resource_init((unsigned char *)"location", 9, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, location_GET_handler);
+	coap_register_handler(r, COAP_REQUEST_POST, location_POST_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
@@ -196,6 +198,7 @@ ze_coap_init_proximity() {
 
 	r = coap_resource_init((unsigned char *)"proximity", 9, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, proximity_GET_handler);
+	coap_register_handler(r, COAP_REQUEST_POST, proximity_POST_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
@@ -259,6 +262,7 @@ ze_coap_init_light() {
 
 	r = coap_resource_init((unsigned char *)"light", 5, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, light_GET_handler);
+	coap_register_handler(r, COAP_REQUEST_POST, light_POST_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
@@ -321,6 +325,7 @@ ze_coap_init_orient() {
 
 	r = coap_resource_init((unsigned char *)"orientation", 11, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, orient_GET_handler);
+	coap_register_handler(r, COAP_REQUEST_POST, orient_POST_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
@@ -381,6 +386,7 @@ ze_coap_init_gyro() {
 
 	r = coap_resource_init((unsigned char *)"gyroscope", 9, 0);
 	coap_register_handler(r, COAP_REQUEST_GET, gyro_GET_handler);
+	coap_register_handler(r, COAP_REQUEST_POST, gyro_POST_handler);
 	//coap_register_handler(r, COAP_REQUEST_PUT, hnd_put_time);
 	//coap_register_handler(r, COAP_REQUEST_DELETE, hnd_delete_time);
 
@@ -553,6 +559,8 @@ generic_POST_handler (coap_context_t  *context, struct coap_resource_t *resource
 	      coap_address_t *peer, coap_pdu_t *request, str *token,
 	      coap_pdu_t *response,
 	      int sensor) {
+
+	RR_REC_counter++;
 
 }
 

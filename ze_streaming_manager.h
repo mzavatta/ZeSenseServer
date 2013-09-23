@@ -81,8 +81,8 @@ enum {
 #define QUEUE_REQ_RATIO		5
 
 /* Source buffer size. */
-#define SOURCE_BUFFER_SIZE 2
-#define REPETITION 1
+#define SOURCE_BUFFER_SIZE 1
+//#define REPETITION 1
 
 /* Other settings, to be moved */
 #define ZE_NUMSENSORS		(14+1) /* +1 in order to use sensor types

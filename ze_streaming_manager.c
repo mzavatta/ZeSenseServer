@@ -472,7 +472,7 @@ ze_coap_streaming_thread(void* args) {
 
 						/* Deliver command to the protocol layer. */
 						put_coap_helper(notbuf, STREAM_NOTIFICATION,
-								stream->reg, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
+								stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
 
 						/* We sent as many samples as there were in the buffer. */
 						stream->samples_sent += SOURCE_BUFFER_SIZE;

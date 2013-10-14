@@ -20,6 +20,7 @@
 #define DATAPOINT	1
 #define SENDREPORT	2
 #define RECREPORT	3
+#define DATAPOINT_RETRANSMITTED 4
 
 /* Sensor register mirrors Android's one. */
 //...

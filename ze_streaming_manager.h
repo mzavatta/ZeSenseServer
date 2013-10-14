@@ -81,8 +81,11 @@ enum {
 #define QUEUE_REQ_RATIO		5
 
 /* Source buffer size. */
-#define SOURCE_BUFFER_SIZE 1
-//#define REPETITION 1
+#define SOURCE_BUFFER_SIZE 2
+
+/* Repetition switch. */
+#define REPETITION_ON	1
+#define REPETITION_OFF	2
 
 /* Other settings, to be moved */
 #define ZE_NUMSENSORS		(14+1) /* +1 in order to use sensor types
@@ -145,6 +148,10 @@ typedef struct ze_stream_t {
 
 	/* Client specified stream frequency */
 	int freq;
+
+	/* Reliability policy. */
+	int retransmit;
+	int repeat;
 
 	/* Streaming Manager local status variables. */
 	uint64_t last_wts;	//Last wallclock timestamp

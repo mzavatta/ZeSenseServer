@@ -202,7 +202,7 @@ ze_coap_streaming_thread(void* args) {
 	if ( !Location_getTime ) LOGW("Method getTime not found");
 
 
-	/* Preventatively flush sensor queue.. */
+	/* Flush sensor queue. */
 	ASensorEvent evfl;
 	int gotfl = 1;
 	do {
@@ -427,7 +427,7 @@ ze_coap_streaming_thread(void* args) {
 					android_sensor_turnoff(mngr, event.type);
 			}
 
-			/* Done with the oneshots,
+			/* Done with oneshots,
 			 * now this sample might also belong to some stream.
 			 * Here we have to add the timestamp.
 			 * The sequence number is at the "packet" layer,
@@ -439,7 +439,7 @@ ze_coap_streaming_thread(void* args) {
 				stream = mngr->sensors[event.type].streams;
 				while (stream != NULL) {
 
-#ifndef REPETITION
+if (stream->repeat == REPETITION_OFF) {
 					if (stream->event_buffer_level < SOURCE_BUFFER_SIZE) {
 
 						/* Save the sample in the buffer. */
@@ -472,7 +472,7 @@ ze_coap_streaming_thread(void* args) {
 
 						/* Deliver command to the protocol layer. */
 						put_coap_helper(notbuf, STREAM_NOTIFICATION,
-								stream->reg, COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
+								stream->reg, stream->retransmit, pk, smreqbuf, adqueue);
 
 						/* We sent as many samples as there were in the buffer. */
 						stream->samples_sent += SOURCE_BUFFER_SIZE;
@@ -480,7 +480,8 @@ ze_coap_streaming_thread(void* args) {
 						/* Buffer contents have been sent, empty it. */
 						stream->event_buffer_level = 0;
 					}
-#else
+}
+else { //stream->repeat == REPETITION_ON
 /* ATTENTION IT WORKS ONLY WITH SOURCE_BUFFER_SIZE = 2 i.e. REPETITION OF ONE SAMPLE. */
 
 					/* Compute the timestamp of the sample. */
@@ -511,7 +512,7 @@ ze_coap_streaming_thread(void* args) {
 
 					/* Deliver command to the protocol layer. */
 					put_coap_helper(notbuf, STREAM_NOTIFICATION,
-								stream->reg, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
+								stream->reg, stream->retransmit, pk, smreqbuf, adqueue);
 
 					/* We sent one sample. */
 					stream->samples_sent++;
@@ -519,7 +520,7 @@ ze_coap_streaming_thread(void* args) {
 					/* Backup current sample for repetition in the next round. */
 					stream->event_buffer[0] = event;
 					stream->event_rtpts_buffer[0] = tsa;
-#endif
+}
 
 					stream = stream->next;
 				}
@@ -825,11 +826,14 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	if (newstream == NULL) return NULL;
 	newstream->reg = reg;
 	newstream->freq = freq;
+	/* Randomized initial time stamp as recommended by standards. */
 	newstream->last_rtpts = (rand() % 100)+400;
 	newstream->last_wts = 0;
 	newstream->samples_sent = 0;
-	/* TODO randomize rtpts since its first assignment
-	 */
+
+	/* FIXME reliability policies hardcoded for the moment. */
+	newstream->retransmit = COAP_MESSAGE_CON;
+	newstream->repeat = REPETITION_ON;
 
 	//if ( mngr->sensors[sensor_id].android_handle == NULL ) {
 	if ( !(mngr->sensors[sensor_id].is_active) ) {

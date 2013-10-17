@@ -45,6 +45,7 @@ typedef struct ze_sm_response_t {
 
 typedef struct ze_sm_response_buf_t {
 
+	/* Slots array. */
 	ze_sm_response_t rbuf[COAP_RBUF_SIZE];
 
 	/* Indexes, wrap around according to %COAP_RBUF_SIZE*/

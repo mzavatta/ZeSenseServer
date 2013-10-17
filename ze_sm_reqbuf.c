@@ -24,15 +24,14 @@ ze_sm_request_t get_request_buf_item(ze_sm_request_buf_t *buf) {
 
 	ze_sm_request_t temp;
 
+	/* Synchronize with producer. */
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter <= 0) { //empty (shall never < 0 anyway)
 			/*
 			 * pthread_cond_wait(buf->notempty, &(buf->mtx));
 			 * do nothing, we must not block!
 			 */
-			/* Signal that the buffer is empty by returning
-			 * an invalid request */
-			//LOGI("found empty");
+			/* Buffer empty, return invalid item. */
 			temp.rtype = SM_REQ_INVALID;
 		}
 		else {
@@ -41,8 +40,12 @@ ze_sm_request_t get_request_buf_item(ze_sm_request_buf_t *buf) {
 			 */
 			temp = buf->rbuf[buf->gethere];
 			//buf->rbuf[buf->gethere].tkn = NULL; //null the token pointer
+
+			/* Advance buffer tail and item count. */
 			buf->gethere = ((buf->gethere)+1) % SM_RBUF_SIZE;
 			buf->counter--;
+
+			/* No longer full. */
 			pthread_cond_signal(&(buf->notfull)); //surely no longer full
 		}
 	pthread_mutex_unlock(&(buf->mtx));
@@ -54,7 +57,7 @@ ze_sm_request_t get_request_buf_item(ze_sm_request_buf_t *buf) {
 int put_request_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 		ticket_t ticket, int freq) {
 
-
+	/* Synchronize with consumer. */
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter >= SM_RBUF_SIZE) { //full (greater shall not happen)
 			LOGI("Found full");
@@ -69,6 +72,7 @@ int put_request_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 		buf->rbuf[buf->puthere].ticket = ticket;
 		buf->rbuf[buf->puthere].freq = freq;
 
+		/* Advance buffer head and item count. */
 		buf->puthere = ((buf->puthere)+1) % SM_RBUF_SIZE;
 		buf->counter++;
 		//pthread_cond_signal(buf->notempty); //surely no longer empty

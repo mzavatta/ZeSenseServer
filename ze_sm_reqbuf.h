@@ -39,6 +39,7 @@ typedef struct ze_sm_request_t {
 
 typedef struct ze_sm_request_buf_t {
 
+	/* Slots array. */
 	ze_sm_request_t rbuf[SM_RBUF_SIZE];
 
 	/* Indexes, wrap around according to %SM_RBUF_SIZE*/

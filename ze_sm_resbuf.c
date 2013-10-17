@@ -79,34 +79,26 @@ int put_response_buf_item(ze_sm_response_buf_t *buf, int rtype,
 		ticket_t ticket, int conf, /*ze_payload_t *pyl*/unsigned char *pk) {
 
 	int timeout = 0;
-
-	int foundfull = 0;
-
 	struct timespec abstimeout;
 
+	/* Synchronize with consumer. */
 	pthread_mutex_lock(&(buf->mtx));
-		if (buf->counter >= COAP_RBUF_SIZE) { //full (greater shall not happen)
-			foundfull = 1;
+		if (buf->counter >= COAP_RBUF_SIZE) {
+			/* Buffer full, wait for some time. */
 			clock_gettime(CLOCK_REALTIME, &abstimeout);
 			abstimeout.tv_sec = abstimeout.tv_sec + 2;
 			timeout = pthread_cond_timedwait(&(buf->notfull), &(buf->mtx), &abstimeout);
 		}
 
-		if ( !foundfull ||
-				(foundfull && timeout == 0) ) {
+		if ( !timeout ) {
+			/* Insert item in buffer tail. */
 			buf->rbuf[buf->puthere].rtype = rtype;
 			buf->rbuf[buf->puthere].ticket = ticket;
 			buf->rbuf[buf->puthere].conf = conf;
 			//buf->rbuf[buf->puthere].pyl = pyl;
 			buf->rbuf[buf->puthere].pk = pk;
 
-			/*
-			buf->rbuf[buf->puthere].str = str;
-			buf->rbuf[buf->puthere].dest = dest;
-			buf->rbuf[buf->puthere].tknlen = tknlen;
-			buf->rbuf[buf->puthere].tkn = tkn;
-			*/
-
+			/* Advance buffer tail and item count. */
 			buf->puthere = ((buf->puthere)+1) % COAP_RBUF_SIZE;
 			buf->counter++;
 			//pthread_cond_signal(buf->notempty); //surely no longer empty

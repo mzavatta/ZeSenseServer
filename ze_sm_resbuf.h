@@ -33,7 +33,7 @@ typedef struct ze_sm_response_t {
 	/* Request header. */
 	int rtype;				//Request type
 	ticket_t ticket; 	//Request ticket
-	int conf;				//Reliability desired (CON or NON)
+	//moved to ze_sm_packet_t int conf;	//Reliability desired (CON or NON)
 
 	/* Request payload, opaque type.
 	 * The receiver is assumed to know the payload structure
@@ -95,7 +95,7 @@ ze_sm_response_t get_response_buf_item(ze_sm_response_buf_t *buf);
  * @return Zero on success
  */
 int put_response_buf_item(ze_sm_response_buf_t *buf, int rtype,
-		ticket_t reg, int conf, /*ze_payload_t *pyl*/unsigned char *pk);
+		ticket_t reg, /*ze_payload_t *pyl*/unsigned char *pk);
 
 
 ze_sm_response_buf_t* init_coap_buf();

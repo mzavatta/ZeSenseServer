@@ -299,6 +299,7 @@ typedef struct {
 	int sensor;
 	int64_t ntpts;
 	int rtpts;
+	int conf;	//Reliability desired (CON or NON)
 	unsigned char *data;
 	int length; //length of the *data field
 } ze_sm_packet_t;

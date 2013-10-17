@@ -76,7 +76,7 @@ int get_rtp_buf_item(JNIEnv* env, jobject thiz, jobject command) {
 }*/
 
 int put_response_buf_item(ze_sm_response_buf_t *buf, int rtype,
-		ticket_t ticket, int conf, /*ze_payload_t *pyl*/unsigned char *pk) {
+		ticket_t ticket, /*ze_payload_t *pyl*/unsigned char *pk) {
 
 	int timeout = 0;
 	struct timespec abstimeout;
@@ -94,7 +94,7 @@ int put_response_buf_item(ze_sm_response_buf_t *buf, int rtype,
 			/* Insert item in buffer tail. */
 			buf->rbuf[buf->puthere].rtype = rtype;
 			buf->rbuf[buf->puthere].ticket = ticket;
-			buf->rbuf[buf->puthere].conf = conf;
+			//buf->rbuf[buf->puthere].conf = conf; moved to ze_sm_packet_t
 			//buf->rbuf[buf->puthere].pyl = pyl;
 			buf->rbuf[buf->puthere].pk = pk;
 

@@ -57,10 +57,10 @@ get_streaming_manager(/*coap_context_t  *cctx*/) {
 
 /* Some forward declarations for functions that are not really interface
  * and therefore not suitable in the header file. */
-int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
-		ticket_t ticket, int conf, /*ze_payload_t *pyl*/ze_sm_packet_t *pk,
+int put_response_helper(ze_sm_response_buf_t *notbuf, int rtype,
+		ticket_t ticket, /*ze_payload_t *pyl*/ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
-ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
+ze_sm_request_t get_request_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue);
 
 //void proximity_carrier(int signum); //signal handler for deprecated implementation of carriers
 
@@ -234,7 +234,7 @@ ze_coap_streaming_thread(void* args) {
 
 		/* Fetch one request from the buffer, if any.
 		 * get_rq_buf_item does not block */
-		sm_req = get_sm_helper(smreqbuf, adqueue);
+		sm_req = get_request_helper(smreqbuf, adqueue);
 
 		if (sm_req.rtype == SM_REQ_START) {
 			LOGI("SM we got a START STREAM request");
@@ -243,15 +243,15 @@ ze_coap_streaming_thread(void* args) {
 			 * we're not able to start one.
 			 * Ok let's make it return NULL in both cases.. */
 			if ( sm_start_stream(mngr, sm_req.sensor, sm_req.ticket, sm_req.freq) == NULL)
-				put_coap_helper(notbuf, STREAM_STOPPED, sm_req.ticket,
-						ZE_PARAM_UNDEFINED, NULL, smreqbuf, adqueue);
+				put_response_helper(notbuf, STREAM_STOPPED, sm_req.ticket,
+						NULL, smreqbuf, adqueue);
 		}
 		else if (sm_req.rtype == SM_REQ_STOP) {
 			LOGI("SM we got a STOP STREAM request");
 			/* Note that sm_stop_stream frees the memory of the stream it deletes. */
 			if ( sm_stop_stream(mngr, sm_req.sensor, sm_req.ticket) != SM_ERROR )
-				put_coap_helper(notbuf, STREAM_STOPPED, sm_req.ticket,
-						ZE_PARAM_UNDEFINED, NULL, smreqbuf, adqueue);
+				put_response_helper(notbuf, STREAM_STOPPED, sm_req.ticket,
+						NULL, smreqbuf, adqueue);
 				/*
 				 * Note that we do not COAP_STREAM_STOPPED if no stream with
 				 * that ticket number has been found. This is because the
@@ -261,8 +261,8 @@ ze_coap_streaming_thread(void* args) {
 		else if (sm_req.rtype == SM_REQ_ONESHOT) {
 			LOGI("SM we got a ONESHOT request");
 			if (mngr->sensors[sm_req.sensor].cache_valid == 1) {
-				/* Cache is fresh. */
 
+				/* Cache is fresh. Answer immediately. */
 				LOGI("SM serving oneshot request from cache");
 
 				event = mngr->sensors[sm_req.sensor].event_cache;
@@ -270,11 +270,12 @@ ze_coap_streaming_thread(void* args) {
 				//pk = form_sm_packet(event);
 				pk = encode(&event, &fakets, 1);
 
-				/* Mirror the received request in the sender's interface
-				 * attaching the payload. Do not free pyl because not it
+				/* Set reliability desired. */
+				pk->conf = COAP_MESSAGE_NON;
+
+				/* Do not free pyl because not it
 				 * is needed by the notbuf. */
-				put_coap_helper(notbuf, ONESHOT, sm_req.ticket,
-						COAP_MESSAGE_NON, pk, smreqbuf, adqueue);
+				put_response_helper(notbuf, ONESHOT, sm_req.ticket, pk, smreqbuf, adqueue);
 			}
 			else {
 				/* Cache may be old.
@@ -408,11 +409,13 @@ ze_coap_streaming_thread(void* args) {
 					//pk = form_sm_packet(event);
 					pk = encode(&event, &fakets, 1);
 
+					/* Set reliability desired. */
+					pk->conf = COAP_MESSAGE_CON;
+
 					/* Take first element. */
 					osreq = mngr->sensors[event.type].oneshots;
 					/* Use its ticket to send the sample */
-					put_coap_helper(notbuf, ONESHOT,
-							osreq->one, COAP_MESSAGE_CON, pk, smreqbuf, adqueue);
+					put_response_helper(notbuf, ONESHOT, osreq->one, pk, smreqbuf, adqueue);
 					/* Unplug before freeing. */
 					mngr->sensors[event.type].oneshots = osreq->next;
 					free(osreq);
@@ -470,9 +473,12 @@ if (stream->repeat == REPETITION_OFF) {
 						/* Encode packet bundle. */
 						pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
 
+						/* Set reliability desired. */
+						pk->conf = stream->retransmit;
+
 						/* Deliver command to the protocol layer. */
-						put_coap_helper(notbuf, STREAM_UPDATE,
-								stream->reg, stream->retransmit, pk, smreqbuf, adqueue);
+						put_response_helper(notbuf, STREAM_UPDATE,
+								stream->reg, pk, smreqbuf, adqueue);
 
 						/* We sent as many samples as there were in the buffer. */
 						stream->samples_sent += SOURCE_BUFFER_SIZE;
@@ -510,9 +516,12 @@ else { //stream->repeat == REPETITION_ON
 					/* Encode packet bundle. */
 					pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
 
+					/* Set reliability desired. */
+					pk->conf = stream->retransmit;
+
 					/* Deliver command to the protocol layer. */
-					put_coap_helper(notbuf, STREAM_UPDATE,
-								stream->reg, stream->retransmit, pk, smreqbuf, adqueue);
+					put_response_helper(notbuf, STREAM_UPDATE,
+								stream->reg, pk, smreqbuf, adqueue);
 
 					/* We sent one sample. */
 					stream->samples_sent++;
@@ -749,8 +758,8 @@ pthread_mutex_unlock(&lmtx);
 
 /*------------------ Anti-deadlock queue wrappers -----------------------------------*/
 
-int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
-		ticket_t ticket, int conf, /*ze_payload_t *pyl,*/ ze_sm_packet_t *pk,
+int put_response_helper(ze_sm_response_buf_t *notbuf, int rtype,
+		ticket_t ticket, /*ze_payload_t *pyl,*/ ze_sm_packet_t *pk,
 		ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
 
 	int result;
@@ -762,7 +771,7 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 	 * we'll fetch from list head.
 	 * Loop until the original put succeeds.
 	 */
-	result = put_response_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
+	result = put_response_buf_item(notbuf, rtype, ticket, /*pyl*/(unsigned char*)pk);
 	while (result == ETIMEDOUT) {
 		LOGW("Deadlock resolution mechanism kicked in!");
 		/* Take some memory for the queue element and copy.
@@ -783,13 +792,13 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 		temp->req = get_request_buf_item(smreqbuf);
 		LL_APPEND(adqueue, temp);
 
-		result = put_response_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
+		result = put_response_buf_item(notbuf, rtype, ticket, /*pyl*/(unsigned char*)pk);
 	}
 	return 1;
 }
 
 /* It frees the memory, do not need to free anything outside!! */
-ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
+ze_sm_request_t get_request_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *adqueue) {
 
 	sm_req_internal_t *temp = NULL;
 	ze_sm_request_t ret;
@@ -832,8 +841,8 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	newstream->samples_sent = 0;
 
 	/* FIXME reliability policies hardcoded for the moment. */
-	newstream->retransmit = COAP_MESSAGE_CON;
-	newstream->repeat = REPETITION_ON;
+	newstream->retransmit = COAP_MESSAGE_NON;
+	newstream->repeat = REPETITION_OFF;
 
 	//if ( mngr->sensors[sensor_id].android_handle == NULL ) {
 	if ( !(mngr->sensors[sensor_id].is_active) ) {
@@ -1253,6 +1262,10 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 
 	c->rtpts = rtpts[0];
 	c->ntpts = event[0].timestamp;
+
+	/* Set default delivery as unreliable.
+	 * Callers can modify this value outside this function. */
+	c->conf = COAP_MESSAGE_NON;
 
 	int totlength = 0;
 	int offset = 0;

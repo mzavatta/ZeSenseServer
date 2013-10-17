@@ -160,7 +160,7 @@ ze_coap_server_core_thread(void *args) {
 	 */
 
 	if (req.rtype == STREAM_STOPPED) {
-		LOGI("Server layer got a STREAM STOPPED command");
+		LOGI("Server layer got a STREAM STOPPED response");
 
 		reg = (coap_registration_t *)(req.ticket);
 
@@ -173,7 +173,7 @@ ze_coap_server_core_thread(void *args) {
 		coap_registration_release(res, reg);
 	}
 	else if (req.rtype == ONESHOT) {
-		LOGI("Server layer got a SEND ASYNCH command");
+		LOGI("Server layer got a SEND ASYNCH response");
 		/* Lookup in the async register using the ticket tid..
 		 * it shall find it..
 		 */
@@ -184,18 +184,18 @@ ze_coap_server_core_thread(void *args) {
 			//pyl = form_data_payload(reqpacket);
 
 			/* Need to add options in order... */
-			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
+			pdu = coap_pdu_init(reqpacket->conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
 			coap_add_option(pdu, COAP_OPTION_TOKEN, asy->tokenlen, asy->token);
 			//coap_add_data(pdu, pyl->length, pyl->data);
 			coap_add_data(pdu, reqpacket->length, reqpacket->data);
 
 			/* Send message. */
-			if (req.conf == COAP_MESSAGE_CON) {
+			if (reqpacket->conf == COAP_MESSAGE_CON) {
 				LOGI("Server layer sending CON simple message");
 				coap_send_confirmed(cctx, &(asy->peer), pdu);
 			}
-			else if (req.conf == COAP_MESSAGE_NON) {
+			else if (reqpacket->conf == COAP_MESSAGE_NON) {
 				LOGI("Server layer ending NON simple message");
 				coap_send(cctx, &(asy->peer), pdu);
 				coap_pdu_clear(pdu, COAP_MAX_PDU_SIZE);
@@ -213,7 +213,7 @@ ze_coap_server_core_thread(void *args) {
 		//free(pyl);
 	}
 	else if (req.rtype == STREAM_UPDATE) {
-		LOGI("Server layer got a SEND NOTIF command");
+		LOGI("Server layer got a STREAM UPDATE response");
 
 		reg = (coap_registration_t *)(req.ticket);
 
@@ -221,7 +221,7 @@ ze_coap_server_core_thread(void *args) {
 		 * that corresponds to the ticket is still
 		 * valid. It may be, indeed, that the failcount
 		 * has topped, a stopstream request has been
-		 * issued, but some previous send commands
+		 * issued, but some previous UPDATE responses
 		 * are still in the buffer. So we must protect
 		 * and do not send notifications belonging
 		 * to a registration that is already invalidated
@@ -241,7 +241,7 @@ ze_coap_server_core_thread(void *args) {
 			//pyl = form_data_payload(reqpacket);
 
 			/* Need to add options in order... */
-			pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
+			pdu = coap_pdu_init(reqpacket->conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
 			short st = htons(reg->notcnt);
 			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(st));
@@ -251,19 +251,19 @@ ze_coap_server_core_thread(void *args) {
 			coap_add_data(pdu, reqpacket->length, reqpacket->data);
 
 			int sent = 1;
-			if (reg->non_cnt >= COAP_OBS_MAX_NON || req.conf == COAP_MESSAGE_CON) {
+			if (reg->non_cnt >= COAP_OBS_MAX_NON || reqpacket->conf == COAP_MESSAGE_CON) {
 				/* Either the max NON have been reached or
 				 * we explicitly requested a CON.
 				 * Send a CON and clean the NON counter
 				 */
-				LOGI("Server layer sending CON notification");
+				LOGI("CoAP layer sending CON notification");
 				pdu->hdr->type = COAP_MESSAGE_CON;
 				coap_notify_confirmed(cctx, &(reg->subscriber), pdu,
 						coap_registration_checkout(reg) );
 
 				reg->non_cnt = 0;
 			}
-			else if (req.conf == COAP_MESSAGE_NON) {
+			else if (reqpacket->conf == COAP_MESSAGE_NON) {
 				/* send a non-confirmable
 				 * and increase the NON counter
 				 * no need to keep the transaction state
@@ -298,7 +298,7 @@ ze_coap_server_core_thread(void *args) {
 					if (srpyl==NULL)
 						LOGW("form sr payload failed");
 					/* Need to add options in order... */
-					pdu = coap_pdu_init(req.conf, COAP_RESPONSE_205,
+					pdu = coap_pdu_init(COAP_MESSAGE_CON, COAP_RESPONSE_205,
 							coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
 					short st = htons(reg->notcnt);
 					coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short),(unsigned char*)&(st));
@@ -362,7 +362,7 @@ ze_coap_server_core_thread(void *args) {
 		//foundempty = 1;
 	}
 	else {
-		LOGW("Server layer cannot interpret upper layer command");
+		LOGW("Server layer cannot interpret upper layer response");
 		exit(1);
 	}
 
@@ -386,8 +386,8 @@ pthread_mutex_lock(&lmtx);
 	LOGW("-- CoAP level stats start ------");
 	sprintf(logstr, "-- CoAP level stats start ------\n"); FWRITE
 
-	LOGW("Command queue residual size:%d", notbuf->counter);
-	sprintf(logstr, "Command queue residual size:%d\n", notbuf->counter); FWRITE
+	LOGW("Response queue residual size:%d", notbuf->counter);
+	sprintf(logstr, "Response queue residual size:%d\n", notbuf->counter); FWRITE
 
 	coap_resource_t *s, *bku;
 	coap_registration_t *sub;

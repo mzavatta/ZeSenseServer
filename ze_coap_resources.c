@@ -480,7 +480,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 			 * unless he's given it up spontaneously for some strange reason,
 			 * in which case there might be a STREAM STOPPED message on the fly,
 			 * either still in the other thread's body or in the other queue.. */
-			put_sm_buf_item(context->smreqbuf, SM_REQ_START, sensor,
+			put_request_buf_item(context->smreqbuf, SM_REQ_START, sensor,
 					(ticket_t)coap_registration_checkout(reg), freq);
 
 
@@ -518,7 +518,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 			asy = coap_register_async(context, peer, request,
 					COAP_ASYNC_SEPARATE, NULL);
 
-			put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, sensor,
+			put_request_buf_item(context->smreqbuf, SM_REQ_ONESHOT, sensor,
 					(ticket_t)(asy->id), 0);
 
 			/*
@@ -536,7 +536,7 @@ generic_GET_handler (coap_context_t  *context, struct coap_resource_t *resource,
 		asy = coap_register_async(context, peer, request,
 				COAP_ASYNC_SEPARATE, NULL);
 
-		put_sm_buf_item(context->smreqbuf, SM_REQ_ONESHOT, sensor,
+		put_request_buf_item(context->smreqbuf, SM_REQ_ONESHOT, sensor,
 				(ticket_t)asy->id, 0);
 
 		/* As per CoAP observer draft, clear this registration.
@@ -583,7 +583,7 @@ generic_on_unregister(coap_context_t *ctx, coap_registration_t *reg,
 	 * If the streaming manager does not have any stream
 	 * with that ticket (should not happen) it confirms the cancellation anyways.
 	 */
-	put_sm_buf_item(ctx->smreqbuf, SM_REQ_STOP, sensor,
+	put_request_buf_item(ctx->smreqbuf, SM_REQ_STOP, sensor,
 			(ticket_t)/*coap_registration_checkout(*/reg/*)*/, 0);
 
 }

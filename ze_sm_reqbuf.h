@@ -68,7 +68,7 @@ typedef struct ze_sm_request_buf_t {
  *
  * @return The oldest item in the buffer, NULL if buffer empty
  */
-ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf);
+ze_sm_request_t get_request_buf_item(ze_sm_request_buf_t *buf);
 
 /*
  * To fit our purposes:
@@ -87,7 +87,7 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf);
  *
  * @return Zero on success
  */
-int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor, /*coap_address_t dest,*/
+int put_request_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor, /*coap_address_t dest,*/
 		ticket_t reg, int freq/*, int tknlen, unsigned char *tkn*/);
 
 ze_sm_request_buf_t* init_sm_buf();

@@ -73,7 +73,7 @@ typedef struct ze_sm_response_buf_t {
  *
  * @return The oldest item in the buffer, NULL if buffer empty
  */
-ze_sm_response_t get_coap_buf_item(ze_sm_response_buf_t *buf);
+ze_sm_response_t get_response_buf_item(ze_sm_response_buf_t *buf);
 
 /*
  * To fit our purposes:
@@ -93,7 +93,7 @@ ze_sm_response_t get_coap_buf_item(ze_sm_response_buf_t *buf);
  *
  * @return Zero on success
  */
-int put_coap_buf_item(ze_sm_response_buf_t *buf, int rtype,
+int put_response_buf_item(ze_sm_response_buf_t *buf, int rtype,
 		ticket_t reg, int conf, /*ze_payload_t *pyl*/unsigned char *pk);
 
 

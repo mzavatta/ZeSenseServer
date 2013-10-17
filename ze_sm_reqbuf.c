@@ -15,7 +15,7 @@
 #include "ze_log.h"
 
 
-ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
+ze_sm_request_t get_request_buf_item(ze_sm_request_buf_t *buf) {
 
 	/* Here I have the choice of creating a new item or just pass
 	 * it back by value.
@@ -51,7 +51,7 @@ ze_sm_request_t get_sm_buf_item(ze_sm_request_buf_t *buf) {
 }
 
 
-int put_sm_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
+int put_request_buf_item(ze_sm_request_buf_t *buf, int rtype, int sensor,
 		ticket_t ticket, int freq) {
 
 

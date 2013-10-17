@@ -153,7 +153,7 @@ ze_coap_server_core_thread(void *args) {
 
 	/* Start by fetching an SM request and dispatch it
 	 */
-	req = get_coap_buf_item(notbuf);
+	req = get_response_buf_item(notbuf);
 	ze_sm_packet_t *reqpacket = (ze_sm_packet_t *)req.pk;
 	/* Recall that the getter does not do any checkout not free
 	 * Under this model only the CoAP server manages the ticket
@@ -212,7 +212,7 @@ ze_coap_server_core_thread(void *args) {
 		//free(pyl->data);
 		//free(pyl);
 	}
-	else if (req.rtype == STREAM_NOTIFICATION) {
+	else if (req.rtype == STREAM_UPDATE) {
 		LOGI("Server layer got a SEND NOTIF command");
 
 		reg = (coap_registration_t *)(req.ticket);
@@ -355,7 +355,7 @@ ze_coap_server_core_thread(void *args) {
 		//free(pyl->data);
 		//free(pyl);
 	}
-	else if (req.rtype == INVALID_COMMAND) {
+	else if (req.rtype == INVALID_RESPONSE) {
 		/* Buffer's empty, do not loop any more times,
 		 * better to go on doing something else.
 		 */

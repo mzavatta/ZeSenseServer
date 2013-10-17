@@ -471,7 +471,7 @@ if (stream->repeat == REPETITION_OFF) {
 						pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
 
 						/* Deliver command to the protocol layer. */
-						put_coap_helper(notbuf, STREAM_NOTIFICATION,
+						put_coap_helper(notbuf, STREAM_UPDATE,
 								stream->reg, stream->retransmit, pk, smreqbuf, adqueue);
 
 						/* We sent as many samples as there were in the buffer. */
@@ -511,7 +511,7 @@ else { //stream->repeat == REPETITION_ON
 					pk = encode(stream->event_buffer, stream->event_rtpts_buffer, SOURCE_BUFFER_SIZE);
 
 					/* Deliver command to the protocol layer. */
-					put_coap_helper(notbuf, STREAM_NOTIFICATION,
+					put_coap_helper(notbuf, STREAM_UPDATE,
 								stream->reg, stream->retransmit, pk, smreqbuf, adqueue);
 
 					/* We sent one sample. */
@@ -762,7 +762,7 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 	 * we'll fetch from list head.
 	 * Loop until the original put succeeds.
 	 */
-	result = put_coap_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
+	result = put_response_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
 	while (result == ETIMEDOUT) {
 		LOGW("Deadlock resolution mechanism kicked in!");
 		/* Take some memory for the queue element and copy.
@@ -780,10 +780,10 @@ int put_coap_helper(ze_sm_response_buf_t *notbuf, int rtype,
 		temp = malloc(sizeof(sm_req_internal_t));
 		if (temp == NULL) return -1;
 		temp->next = NULL;
-		temp->req = get_sm_buf_item(smreqbuf);
+		temp->req = get_request_buf_item(smreqbuf);
 		LL_APPEND(adqueue, temp);
 
-		result = put_coap_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
+		result = put_response_buf_item(notbuf, rtype, ticket, conf, /*pyl*/(unsigned char*)pk);
 	}
 	return 1;
 }
@@ -808,7 +808,7 @@ ze_sm_request_t get_sm_helper(ze_sm_request_buf_t *smreqbuf, sm_req_internal_t *
 		return ret;
 	}
 	/* Otherwise very normal get... */
-	return get_sm_buf_item(smreqbuf);
+	return get_request_buf_item(smreqbuf);
 }
 
 

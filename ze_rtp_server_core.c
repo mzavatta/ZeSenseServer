@@ -109,7 +109,7 @@ ze_rtp_server_core_thread(void *args) {
 	str->ssrc = rand();
 	str->seqn = rand();
 	str->dest = rctx->dst;
-	put_sm_buf_item(smreqbuf, SM_REQ_START, ASENSOR_TYPE_ACCELEROMETER,
+	put_request_buf_item(smreqbuf, SM_REQ_START, ASENSOR_TYPE_ACCELEROMETER,
 			(ticket_t)str, freq);
 
 
@@ -144,7 +144,7 @@ ze_rtp_server_core_thread(void *args) {
 
 			/* Start by fetching an SM request and dispatch it
 			 */
-			req = get_coap_buf_item(notbuf);
+			req = get_response_buf_item(notbuf);
 			ze_sm_packet_t *reqpacket = (ze_sm_packet_t *)req.pk;
 
 			if (req.rtype == STREAM_STOPPED) {
@@ -160,7 +160,7 @@ ze_rtp_server_core_thread(void *args) {
 				LOGI("CS Got a SEND ASYNCH command");
 				/* Maybe not meaningful in our case. */
 			}
-			else if (req.rtype == STREAM_NOTIFICATION) {
+			else if (req.rtype == STREAM_UPDATE) {
 				LOGI("CS Got a SEND NOTIF command");
 
 				str = (rtp_stream_t *)req.ticket;
@@ -241,7 +241,7 @@ ze_rtp_server_core_thread(void *args) {
 				else LOGI("Not sending notification, registration already invalid.");
 
 			}
-			else if (req.rtype == INVALID_COMMAND) {
+			else if (req.rtype == INVALID_RESPONSE) {
 				/* Buffer's empty, do not loop any more times,
 				 * better to go on doing something else.
 				 */

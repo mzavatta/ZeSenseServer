@@ -15,26 +15,31 @@
 #include "ze_coap_server_core.h"
 #include "ze_streaming_manager.h"
 
-ze_sm_response_t get_coap_buf_item(ze_sm_response_buf_t *buf) {
+ze_sm_response_t get_response_buf_item(ze_sm_response_buf_t *buf) {
 
 	ze_sm_response_t temp;
 
+	/* Synchronize with producer. */
 	pthread_mutex_lock(&(buf->mtx));
 		if (buf->counter <= 0) { //empty (shall never < 0 anyway)
 			/*
 			 * pthread_cond_wait(buf->notempty, buf->mtx);
 			 * do nothing, we must not block!
 			 */
-			/* Signal that the buffer is empty by returning
-			 * an invalid request */
-			temp.rtype = INVALID_COMMAND;
+			/* Buffer empty, return invalid item. */
+			temp.rtype = INVALID_RESPONSE;
 		}
 		else {
+
+			/* Copy item from buffer head. */
 			temp = buf->rbuf[buf->gethere];
-			//temp.reg = coap_registration_checkout(temp.reg);
+
+			/* Advance buffer head and item count. */
 			buf->gethere = ((buf->gethere)+1) % COAP_RBUF_SIZE;
 			buf->counter--;
-			pthread_cond_signal(&(buf->notfull)); //surely no longer full
+
+			/* Surely no longer full. */
+			pthread_cond_signal(&(buf->notfull));
 		}
 	pthread_mutex_unlock(&(buf->mtx));
 
@@ -70,7 +75,7 @@ int get_rtp_buf_item(JNIEnv* env, jobject thiz, jobject command) {
 	// * sort of command.type == temp.rtype
 }*/
 
-int put_coap_buf_item(ze_sm_response_buf_t *buf, int rtype,
+int put_response_buf_item(ze_sm_response_buf_t *buf, int rtype,
 		ticket_t ticket, int conf, /*ze_payload_t *pyl*/unsigned char *pk) {
 
 	int timeout = 0;

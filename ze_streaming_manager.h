@@ -63,13 +63,17 @@ enum {
 #define SM_EMPTY			4
 #define SM_OUT_RANGE		5
 
-/* Request codes
- * mirroring start_stream() and
- * stop_stream() calls */
+/* Request codes. */
 #define SM_REQ_START		10
 #define SM_REQ_STOP			20
 #define SM_REQ_ONESHOT		30
 #define SM_REQ_INVALID		(-1)
+
+/* Response codes. */
+#define STREAM_UPDATE		50
+#define ONESHOT				60
+#define STREAM_STOPPED		70
+#define INVALID_RESPONSE	40
 
 /* Sensor settings */
 #define DEFAULT_FREQ		10
@@ -90,12 +94,6 @@ enum {
 /* Other settings, to be moved */
 #define ZE_NUMSENSORS		(14+1) /* +1 in order to use sensor types
 									* as array indexes */
-
-/* Request codes for the lower layer. */
-#define STREAM_NOTIFICATION			50
-#define ONESHOT						60
-#define STREAM_STOPPED				70
-#define INVALID_COMMAND				40
 
 /* Utilities */
 #define TRUE 	0

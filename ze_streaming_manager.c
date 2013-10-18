@@ -23,10 +23,8 @@ typedef struct sm_req_internal_t {
 	ze_sm_request_t req;
 } sm_req_internal_t;
 
-//ze_sm_packet_t* form_sm_packet(ASensorEvent event);
 ze_sm_packet_t *
 encode(ASensorEvent *event, int *rtpts, int num);
-
 
 struct generic_carr_thread_args pcargs; //proximity carrier thread args
 struct generic_carr_thread_args ocargs; //orientation carrier thread args
@@ -266,8 +264,7 @@ ze_coap_streaming_thread(void* args) {
 				LOGI("SM serving oneshot request from cache");
 
 				event = mngr->sensors[sm_req.sensor].event_cache;
-				//pyl = form_data_payload(event);
-				//pk = form_sm_packet(event);
+
 				pk = encode(&event, &fakets, 1);
 
 				/* Set reliability desired. */
@@ -405,8 +402,6 @@ ze_coap_streaming_thread(void* args) {
 				while (mngr->sensors[event.type].oneshots != NULL) {
 
 					/* Allocate a new payload. */
-					//pyl = form_data_payload(event);
-					//pk = form_sm_packet(event);
 					pk = encode(&event, &fakets, 1);
 
 					/* Set reliability desired. */
@@ -1273,7 +1268,6 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 	int ts = 0;
 
 	if (event[0].type == ASENSOR_TYPE_ACCELEROMETER) {
-		c->sensor = ASENSOR_TYPE_ACCELEROMETER;
 
 		totlength = sizeof(ze_payload_header_t)+
 				num*(sizeof(int)+sizeof(ze_accel_vector_t));
@@ -1304,7 +1298,6 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 		c->length = totlength;
 	}
 	if (event[0].type == ASENSOR_TYPE_PROXIMITY) {
-		c->sensor = ASENSOR_TYPE_PROXIMITY;
 
 		totlength = sizeof(ze_payload_header_t)+
 				num*(sizeof(int)+sizeof(ze_prox_vector_t));
@@ -1331,7 +1324,6 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 		c->length = totlength;
 	}
 	if (event[0].type == ASENSOR_TYPE_LIGHT) {
-		c->sensor = ASENSOR_TYPE_LIGHT;
 
 		totlength = sizeof(ze_payload_header_t)+
 				num*(sizeof(int)+sizeof(ze_light_vector_t));
@@ -1358,7 +1350,6 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 		c->length = totlength;
 	}
 	if (event[0].type == ZESENSE_SENSOR_TYPE_ORIENTATION) {
-		c->sensor = ZESENSE_SENSOR_TYPE_ORIENTATION;
 
 		totlength = sizeof(ze_payload_header_t)+
 				num*(sizeof(int)+sizeof(ze_orient_vector_t));
@@ -1389,7 +1380,6 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 		c->length = totlength;
 	}
 	if (event[0].type == ASENSOR_TYPE_GYROSCOPE) {
-		c->sensor = ASENSOR_TYPE_GYROSCOPE;
 
 		totlength = sizeof(ze_payload_header_t)+
 				num*(sizeof(int)+sizeof(ze_gyro_vector_t));
@@ -1423,116 +1413,7 @@ encode(ASensorEvent *event, int *rtpts, int num) {
 
 	return c;
 
-
 }
-
-
-
-
-
-
-
-
-	/*
-	 ze_payload_header_t
-	 timestamp 32bit (int)
-	 packet->data,length
-	 */
-/*
-	ze_payload_t *c = malloc(sizeof(ze_payload_t));
-	if (c==NULL) return NULL;
-
-	int totlength = sizeof(ze_payload_header_t)+sizeof(int)+packet->length;
-	c->data = malloc(totlength);
-	if(c->data == NULL) return NULL;
-	c->length = totlength;
-	memset(c->data, 0, totlength);
-
-	int offset = 0;
-	unsigned char *p = c->data;
-
-	ze_payload_header_t *hdr = (ze_payload_header_t*)(p);
-	hdr->packet_type = DATAPOINT;
-	hdr->sensor_type = packet->sensor;
-	hdr->length = htons(totlength);
-
-	offset = sizeof(ze_payload_header_t);
-	p = p + offset;
-	int rtpts = htonl(packet->rtpts);
-	memcpy(p, &rtpts, sizeof(int));
-
-	offset = sizeof(int);
-	p = p + offset;
-	memcpy(p, packet->data, packet->length);
-
-	return c;
-}*/
-
-/*
-ze_sm_packet_t *
-form_sm_packet(ASensorEvent event) {
-
-	ze_sm_packet_t *c = malloc(sizeof(ze_sm_packet_t));
-	if (c==NULL) return NULL;
-	memset(c, 0, sizeof(ze_sm_packet_t));
-
-	c->rtpts = 0;
-	c->ntpts = event.timestamp;
-
-	if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
-		c->sensor = ASENSOR_TYPE_ACCELEROMETER;
-		ze_accel_vector_t *temp = malloc(sizeof(ze_accel_vector_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_accel_vector_t));
-		sprintf(temp->x, "%e", event.acceleration.x);
-		sprintf(temp->y, "%e", event.acceleration.y);
-		sprintf(temp->z, "%e", event.acceleration.z);
-		c->data = temp;
-		c->length = sizeof(ze_accel_vector_t);
-	}
-	else if (event.type == ASENSOR_TYPE_PROXIMITY) {
-		c->sensor = ASENSOR_TYPE_PROXIMITY;
-		ze_prox_vector_t *temp = malloc(sizeof(ze_prox_vector_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_prox_vector_t));
-		sprintf(temp->distance, "%e", event.distance);
-		c->data = temp;
-		c->length = sizeof(ze_prox_vector_t);
-	}
-	else if (event.type == ASENSOR_TYPE_LIGHT) {
-		c->sensor = ASENSOR_TYPE_LIGHT;
-		ze_light_vector_t *temp = malloc(sizeof(ze_light_vector_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_light_vector_t));
-		sprintf(temp->light, "%e", event.light);
-		c->data = temp;
-		c->length = sizeof(ze_light_vector_t);
-	}
-	else if (event.type == ZESENSE_SENSOR_TYPE_ORIENTATION) {
-		c->sensor = ZESENSE_SENSOR_TYPE_ORIENTATION;
-		ze_orient_vector_t *temp = malloc(sizeof(ze_orient_vector_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_orient_vector_t));
-		sprintf(temp->azimuth, "%e", event.vector.azimuth);
-		sprintf(temp->pitch, "%e", event.vector.pitch);
-		sprintf(temp->roll, "%e", event.vector.roll);
-		c->data = temp;
-		c->length = sizeof(ze_orient_vector_t);
-	}
-	else if (event.type == ASENSOR_TYPE_GYROSCOPE) {
-		c->sensor = ASENSOR_TYPE_GYROSCOPE;
-		ze_gyro_vector_t *temp = malloc(sizeof(ze_gyro_vector_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_gyro_vector_t));
-		sprintf(temp->x, "%e", event.vector.x);
-		sprintf(temp->y, "%e", event.vector.y);
-		sprintf(temp->z, "%e", event.vector.z);
-		c->data = temp;
-		c->length = sizeof(ze_gyro_vector_t);
-	}
-
-	return c;
-}*/
 
 
 /* We synch access to event_cache and freq because they are
@@ -1540,19 +1421,15 @@ form_sm_packet(ASensorEvent event) {
  * on them will most likely not be atomic.
  */
 ASensorEvent read_last_event_SYN(ze_sensor_t *sensor) {
-	//LOGW("Reading last event..");
 	pthread_mutex_lock(&(sensor->carrthrmtx));
 		ASensorEvent ev = sensor->event_cache;
 	pthread_mutex_unlock(&(sensor->carrthrmtx));
-	//LOGW("Mutex released");
 	return ev;
 }
 int write_last_event_SYN(ze_sensor_t *sensor, ASensorEvent ev) {
-	//LOGW("Writing last event..");
 	pthread_mutex_lock(&(sensor->carrthrmtx));
 		sensor->event_cache = ev;
 	pthread_mutex_unlock(&(sensor->carrthrmtx));
-	//LOGW("Mutex released");
 	return 1;
 }
 
@@ -1570,32 +1447,3 @@ int write_stream_freq_SYN(ze_sensor_t *sensor, double freq) {
 	return 1;
 }
 */
-
-
-/*ze_payload_t *
-form_data_payload(ASensorEvent event) {
-
-	ze_payload_t *c = malloc(sizeof(ze_payload_t));
-	if (c==NULL) return NULL;
-	c->data = 0;
-	c->length = 0;
-
-	if (event.type == ASENSOR_TYPE_ACCELEROMETER) {
-		ze_accel_paydata_t *temp = malloc(sizeof(ze_accel_paydata_t));
-		if (temp==NULL) return NULL;
-		memset(temp, 0, sizeof(ze_accel_paydata_t));
-		temp->phdr.packet_type = htonl(DATAPOINT);
-		temp->pdhdr.sensor_type = htonl(ASENSOR_TYPE_ACCELEROMETER);
-		//temp->pdhdr.sn = 0;
-		temp->pdhdr.ts = 0;
-		sprintf(temp->x, "%e", event.acceleration.x);
-		sprintf(temp->y, "%e", event.acceleration.y);
-		sprintf(temp->z, "%e", event.acceleration.z);
-		c->data = temp;
-		c->length = sizeof(ze_accel_paydata_t);
-	}
-	else {
-
-	}
-	return c;
-}*/

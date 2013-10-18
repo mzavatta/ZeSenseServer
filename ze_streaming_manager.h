@@ -296,7 +296,6 @@ typedef struct stream_context_t {
 
 
 typedef struct {
-	int sensor;
 	int64_t ntpts;
 	int rtpts;
 	int conf;	//Reliability desired (CON or NON)

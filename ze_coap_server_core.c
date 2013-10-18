@@ -24,7 +24,6 @@
 
 #include "globals_test.h"
 
-ze_payload_t* form_data_payload(ze_sm_packet_t *packet);
 ze_payload_t* form_sr_payload(coap_registration_t *reg);
 uint64_t htonll(uint64_t value);
 coap_tid_t test_socket_send(coap_context_t *context,
@@ -181,8 +180,6 @@ ze_coap_server_core_thread(void *args) {
 		asy = coap_find_async(cctx, tid);
 		if (asy != NULL) {
 
-			//pyl = form_data_payload(reqpacket);
-
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(reqpacket->conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
@@ -238,16 +235,13 @@ ze_coap_server_core_thread(void *args) {
 			reg->ntptwin = reqpacket->ntpts;
 			reg->rtptwin = reqpacket->rtpts;
 
-			//pyl = form_data_payload(reqpacket);
-
 			/* Need to add options in order... */
 			pdu = coap_pdu_init(reqpacket->conf, COAP_RESPONSE_205,
 					coap_new_message_id(cctx), COAP_MAX_PDU_SIZE);
 			short st = htons(reg->notcnt);
 			coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short), (unsigned char*)&(st));
 			coap_add_option(pdu, COAP_OPTION_TOKEN, reg->token_length, reg->token);
-			//coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
-			//coap_add_data(pdu, pyl->length, pyl->data);
+
 			coap_add_data(pdu, reqpacket->length, reqpacket->data);
 
 			int sent = 1;
@@ -303,7 +297,7 @@ ze_coap_server_core_thread(void *args) {
 					short st = htons(reg->notcnt);
 					coap_add_option(pdu, COAP_OPTION_SUBSCRIPTION, sizeof(short),(unsigned char*)&(st));
 					coap_add_option(pdu, COAP_OPTION_TOKEN, reg->token_length, reg->token);
-					//coap_add_option(pdu, COAP_OPTION_STREAMING, 7, "chunked");
+
 					coap_add_data(pdu, srpyl->length, srpyl->data);
 
 					reg->last_sr_octcount = reg->octcount;
@@ -485,44 +479,6 @@ pthread_mutex_unlock(&lmtx);
 && (!token || (token->length == s->token_length
 	       && memcmp(token->s, s->token, token->length) == 0)) */
 
-
-ze_payload_t *
-form_data_payload(ze_sm_packet_t *packet) {
-
-	/*
-	 ze_payload_header_t
-	 timestamp 32bit (int)
-	 packet->data,length
-	 */
-
-	ze_payload_t *c = malloc(sizeof(ze_payload_t));
-	if (c==NULL) return NULL;
-
-	int totlength = sizeof(ze_payload_header_t)+sizeof(int)+packet->length;
-	c->data = malloc(totlength);
-	if(c->data == NULL) return NULL;
-	c->length = totlength;
-	memset(c->data, 0, totlength);
-
-	int offset = 0;
-	unsigned char *p = c->data;
-
-	ze_payload_header_t *hdr = (ze_payload_header_t*)(p);
-	hdr->packet_type = DATAPOINT;
-	hdr->sensor_type = packet->sensor;
-	hdr->length = htons(totlength);
-
-	offset = sizeof(ze_payload_header_t);
-	p = p + offset;
-	int rtpts = htonl(packet->rtpts);
-	memcpy(p, &rtpts, sizeof(int));
-
-	offset = sizeof(int);
-	p = p + offset;
-	memcpy(p, packet->data, packet->length);
-
-	return c;
-}
 
 ze_payload_t *
 form_sr_payload(coap_registration_t *reg) {

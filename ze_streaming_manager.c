@@ -836,7 +836,7 @@ ze_stream_t *sm_start_stream(stream_context_t *mngr, int sensor_id,
 	newstream->samples_sent = 0;
 
 	/* FIXME reliability policies hardcoded for the moment. */
-	newstream->retransmit = COAP_MESSAGE_NON;
+	newstream->retransmit = COAP_MESSAGE_CON;
 	newstream->repeat = REPETITION_OFF;
 
 	//if ( mngr->sensors[sensor_id].android_handle == NULL ) {

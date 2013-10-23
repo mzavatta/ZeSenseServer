@@ -85,7 +85,7 @@ enum {
 #define QUEUE_REQ_RATIO		5
 
 /* Source buffer size. */
-#define SOURCE_BUFFER_SIZE 2
+#define SOURCE_BUFFER_SIZE 1
 
 /* Repetition switch. */
 #define REPETITION_ON	1
